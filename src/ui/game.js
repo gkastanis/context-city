@@ -1,8 +1,9 @@
 import { el, button, svgEl } from './dom.js';
 import { formatTokens, sessionCache } from './math.js';
 import { gameFacts, crossedEvents } from './game-model.js';
+import { findings } from './findings.js';
 
-export function createGame({ call, jump, locate, queueEvent = () => {} }) {
+export function createGame({ call, jump, locate, showFindings = () => {}, queueEvent = () => {} }) {
   let session, facts, current = 0, found = new Set(), playing = false, timer = 0, walkTimer = 0, walkMs = 0;
   let guessTimer = 0, guessShown = false, completed = false;
   let introTimers = [], cancelIntro = null, toastTimer = 0, walking = false, lastWalk = 0;
@@ -56,6 +57,9 @@ export function createGame({ call, jump, locate, queueEvent = () => {} }) {
     summaryDialog.replaceChildren(el('div', { class: 'help-heading' }, el('h2', { id: 'summary-heading' }, completion === true ? 'Every discovery found' : 'Your run'), button('Close', () => summaryDialog.close())),
       el('p', { class: 'muted' }, completion === true ? 'You explored the whole Field guide. Here is your session.' : 'A session in numbers.'), el('dl', { class: 'run-stats' }, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, String(value))])));
     if (cache) summaryDialog.append(cacheBar, cacheKey);
+    const top = findings(session)[0];
+    summaryDialog.append(el('p', { class: 'summary-finding' }, top ? `Top finding: ${top.title}` : 'No problems found in this session.',
+      button('Show findings', () => { summaryDialog.close(); showFindings(); })));
     if (completion === true) summaryDialog.append(button('Replay the session', () => { summaryDialog.close(); jump(0, true); play.click(); }, { class: 'primary' }));
     if (!summaryDialog.open) summaryDialog.showModal();
   }

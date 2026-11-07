@@ -423,3 +423,30 @@ button.primary:hover { color: var(--accent); }
 #redacted-notice { max-width: 520px; font-size: 12px; line-height: 1.4; color: var(--muted); }
 .provenance.redacted { border-left: 3px solid var(--accent); padding-left: 10px; }
 @media (max-width: 760px) { #redacted-notice { max-width: 340px; font-size: 11px; } }
+
+/* Findings reserve the tape's actual height, including its expanded controls. */
+#findings-panel { top: 122px; right: var(--gutter-right); bottom: var(--findings-bottom, 230px); width: min(380px, calc(100% - 32px)); z-index: 9; padding: 16px; border-top: 2px solid var(--results); }
+#findings-panel[hidden] { display: none; }
+#findings-panel h2 { margin: 0; }
+#findings-panel > p { font-size: 12px; }
+.findings-count, .finding-cost { font: 11px var(--mono-font); border: 1px solid var(--line); border-radius: 5px; padding: 2px 5px; }
+.findings-list { display: grid; gap: 8px; }
+.finding { display: grid; grid-template-columns: 8px minmax(0, 1fr); gap: 7px 9px; width: 100%; text-align: left; padding: 12px; white-space: normal; overflow-wrap: anywhere; }
+.finding-title { font-size: 13px; line-height: 1.4; }
+.finding-detail { grid-column: 2; font-size: 12px; line-height: 1.5; }
+.finding-cost { grid-column: 2; justify-self: start; color: var(--ink); }
+.finding-marker { width: 7px; height: 7px; margin-top: 5px; border-radius: 50%; background: var(--results); }
+.finding--cache_rewrite .finding-marker { background: var(--accent); }
+.finding--repeated_call .finding-marker { background: var(--tool_call); }
+.finding--unused_tools .finding-marker { background: var(--tools); }
+.finding--compaction_pressure .finding-marker { background: var(--memory); }
+.finding--big_jump .finding-marker { background: var(--message); }
+.summary-finding { display: grid; gap: 10px; justify-items: start; }
+.show-findings #reader-panel { right: calc(var(--gutter-right) + 392px); width: min(460px, calc(100% - 440px)); }
+.show-findings #field-guide, .show-findings #guess-card { display: none; }
+@media (max-width: 760px) {
+  #findings-panel { top: 80px; left: var(--gutter-left); right: var(--gutter-right); width: auto; max-height: 35%; }
+  .show-findings:not(.hide-reader) #findings-panel { bottom: auto; height: 35%; }
+  .show-findings #reader-panel { top: calc(80px + 35% + 12px); right: var(--gutter-right); bottom: var(--findings-bottom, 224px); width: auto; height: auto; min-height: 0; }
+  .show-findings #index-panel { display: none; }
+}

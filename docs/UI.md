@@ -289,3 +289,9 @@ scheduler's tool beams and compaction effects, Guess expiry, phone controls,
 nonoverlapping tape rows, discoveries and replay at desktop and phone widths.
 page-host permissions, physical GPU performance and real touch input remain
 manual checks.
+
+## Findings
+
+Findings ranks large results, prompt cache rebuilds, repeated calls, unused tools, compaction pressure and sudden context growth by input token cost. Cost chips label estimated or measured input. Result shares use estimated sizes; displayed block tokens scale like the reader. Rebuilds subtract truly new tokens on the same scale and attribute context changes before considering expiry. The rebuild summary follows the first rebuild without adding ranking cost or badge count. Unused tools cover the main thread and flag excluded subagent calls.
+
+The panel shows up to 12 entries. Click or press Enter to jump to a request and select its block. Close or Escape dismisses the panel. The run summary links to the top finding. Results are memoised per session and transcript-derived strings render as text nodes.

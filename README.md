@@ -14,6 +14,10 @@ ls -t ~/.claude/projects/*/*.jsonl | head -5
 
 Drag to orbit and scroll to zoom. Use the request slider or Play to move through the session. Open Index to find blocks and Reader to read them. Help and privacy explains the keyboard controls.
 
+## What the page shows
+
+- Findings ranks costly context problems and jumps to the request and block behind each one.
+
 ## Which transcripts show the full context
 
 Recent Claude Code versions (from about 2.1.296 on, in the author's experience)

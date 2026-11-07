@@ -1,5 +1,30 @@
 const requestTapes = new WeakMap();
 
+// Session analytics can visit suffix changes without cloning every cumulative
+// prefix. blockIds is borrowed for this callback only and must not be retained.
+export function forEachRequestChange(session, visit) {
+  const wire = requestTapes.get(session);
+  if (wire) {
+    const ids = [];
+    session.requests.forEach((r, idx) => {
+      const at = wire.offsets[idx], keep = wire.tape[at], count = wire.tape[at + 1];
+      const removed = ids.splice(keep);
+      for (let j = 0; j < count; j++) ids.push(wire.ids[wire.tape[at + 3 + j]]);
+      const news = Array.from(wire.tape.subarray(at + 3 + count, at + 3 + count + wire.tape[at + 2]), n => wire.ids[n]);
+      visit(r, idx, ids, removed, keep, news);
+    });
+    return;
+  }
+  let previous = [];
+  session.requests.forEach((r, idx) => {
+    const ids = r.blockIds;
+    let keep = Number.isInteger(r.newFrom) ? Math.min(r.newFrom, previous.length, ids.length) : 0;
+    while (keep < previous.length && keep < ids.length && previous[keep] === ids[keep]) keep++;
+    visit(r, idx, ids, previous.slice(keep), keep, r.newBlockIds ?? []);
+    previous = ids;
+  });
+}
+
 // Wire format: one shared blocks table and transferred integer request deltas.
 // Each tape entry is [keep, addCount, newCount, ...add, ...newBlockIds].
 export function compactSession(session) {
