@@ -1,5 +1,5 @@
 import { el, button, svgEl } from './dom.js';
-import { formatTokens } from './math.js';
+import { formatTokens, sessionCache } from './math.js';
 import { gameFacts, crossedEvents } from './game-model.js';
 
 export function createGame({ call, jump, locate, queueEvent = () => {} }) {
@@ -46,8 +46,16 @@ export function createGame({ call, jump, locate, queueEvent = () => {} }) {
     const rows = [ ['Peak context', formatTokens(facts.peak)], ['Compactions', facts.compactions],
       ['Tools loaded mid-session', facts.toolsLoaded], ['Tool definitions at the last request', `${facts.toolShare.toFixed(1)}% (estimated)`],
       ['Longest single block', `${formatTokens(facts.biggest?.estTokens ?? 0)} tokens (estimated)`], ['Total requests', session.requests.length] ];
+    // Input tokens summed over every request that reported usage (each request resends the context).
+    const cache = sessionCache(session.requests);
+    if (cache) rows.push(['Input read from cache', formatTokens(cache.read)], ['Input written to cache', formatTokens(cache.write)],
+      ['Uncached input', formatTokens(cache.uncached)], ['Cache hit rate', `${(cache.hitRate * 100).toFixed(1)}% of ${formatTokens(cache.total)} input tokens`]);
+    const cacheBar = cache && el('div', { class: 'cache-bar cache-bar--wide', role: 'img', 'aria-label': `Input over the whole session: ${(cache.hitRate * 100).toFixed(1)}% read from cache` },
+      ...[['read', cache.read], ['write', cache.write], ['uncached', cache.uncached]].map(([kind, v]) => { const seg = el('i', { class: `cache-seg cache-${kind}` }); seg.style.width = `${v / cache.total * 100}%`; return seg; }));
+    const cacheKey = cache && el('p', { class: 'cache-key muted' }, el('i', { class: 'cache-dot cache-read' }), 'read from cache ', el('i', { class: 'cache-dot cache-write' }), 'written to cache ', el('i', { class: 'cache-dot cache-uncached' }), 'uncached. Usage is reported per request, so it cannot be split per block.');
     summaryDialog.replaceChildren(el('div', { class: 'help-heading' }, el('h2', { id: 'summary-heading' }, completion === true ? 'Every discovery found' : 'Your run'), button('Close', () => summaryDialog.close())),
       el('p', { class: 'muted' }, completion === true ? 'You explored the whole Field guide. Here is your session.' : 'A session in numbers.'), el('dl', { class: 'run-stats' }, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, String(value))])));
+    if (cache) summaryDialog.append(cacheBar, cacheKey);
     if (completion === true) summaryDialog.append(button('Replay the session', () => { summaryDialog.close(); jump(0, true); play.click(); }, { class: 'primary' }));
     if (!summaryDialog.open) summaryDialog.showModal();
   }

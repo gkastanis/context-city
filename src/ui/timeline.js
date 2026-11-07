@@ -1,5 +1,5 @@
 import { el, button, svgEl } from './dom.js';
-import { formatTokens, gauge, markerPercent, eventLabel, sparkPoints, requestStories, fuelState, limitOf } from './math.js';
+import { formatTokens, gauge, markerPercent, eventLabel, sparkPoints, requestStories, fuelState, limitOf, cacheSplit } from './math.js';
 
 export function createTimeline(jump) {
   const slider = el('input', { id: 'request-slider', type: 'range', min: 0, max: 0, value: 0, step: 1 });
@@ -12,6 +12,10 @@ export function createTimeline(jump) {
   const total = el('strong'), fill = el('div', { class: 'gauge-fill' }), compact = el('i', { class: 'compact-line' });
   const bar = el('div', { class: 'gauge', role: 'meter', 'aria-label': 'Context window', 'aria-valuemin': 0 }, fill, compact);
   const markers = el('div', { class: 'markers', 'aria-label': 'Session events' });
+  // Prompt cache for this request: read from cache, written to cache, uncached input.
+  const cacheSegs = ['read', 'write', 'uncached'].map(kind => el('i', { class: `cache-seg cache-${kind}` }));
+  const cacheBar = el('div', { class: 'cache-bar', role: 'img' }, ...cacheSegs), cacheText = el('span', { class: 'cache-text' });
+  const cacheRow = el('div', { class: 'cache-row' }, el('span', { class: 'cache-label' }, 'Input cache'), cacheBar, cacheText);
   const markerCanvas = el('canvas', { class: 'marker-canvas', height: 18, 'aria-hidden': 'true' });
   const eventItem = el('div', { role: 'listitem' });
   const markerButton = button('', () => events[focused] && jump(events[focused].requestIdx, true), {
@@ -102,7 +106,7 @@ export function createTimeline(jump) {
   const previous = button('Previous', () => jump(idx - 1, true), { id: 'previous-request' });
   const next = button('Next', () => jump(idx + 1, true), { id: 'next-request' });
   const root = el('section', { id: 'timeline', class: 'card', 'aria-label': 'Request timeline' },
-    el('div', { class: 'timeline-head' }, el('label', { for: 'request-slider' }, 'Request'), position, fuel, fuelStatus, previous, next, total),
+    el('div', { class: 'timeline-head' }, el('label', { for: 'request-slider' }, 'Request'), position, fuel, fuelStatus, previous, next, cacheRow, total),
     slider, markers, story, tooltip, bar,
     el('div', { class: 'gauge-key' }, el('span', {}, '0'), el('span', { id: 'compact-caption' }), el('span', { id: 'window-caption' })), spark);
   return { root,
@@ -135,6 +139,12 @@ export function createTimeline(jump) {
       root.classList.toggle('near-compact', g.total >= limit * .85);
       root.classList.toggle('at-compact', g.total >= limit);
       total.textContent = `${formatTokens(g.total)} of ${formatTokens(session.meta.window)}${g.measured ? ' measured' : ' estimated'}`;
+      const c = cacheSplit(request?.usage); cacheRow.hidden = !c;
+      if (c) {
+        [c.read, c.write, c.uncached].forEach((v, i) => { cacheSegs[i].style.width = `${v / c.total * 100}%`; });
+        cacheText.textContent = `${formatTokens(c.read)} read, ${formatTokens(c.write)} written, ${formatTokens(c.uncached)} uncached (${Math.round(c.hitRate * 100)}% hit)`;
+        cacheBar.setAttribute('aria-label', `Input cache for this request: ${cacheText.textContent}`);
+      }
       fill.style.width = `${g.percent}%`; compact.style.left = `${g.compactPercent}%`;
       bar.setAttribute('aria-valuemax', session.meta.window); bar.setAttribute('aria-valuenow', g.total);
       bar.setAttribute('aria-valuetext', total.textContent);

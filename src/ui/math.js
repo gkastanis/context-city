@@ -4,6 +4,20 @@ export function formatTokens(value) {
   if (value >= 1000) return `${+(value / 1000).toFixed(1)}K`;
   return String(Math.round(value));
 }
+// Prompt-cache split of one request's input, from the assistant turn's usage
+// block. Usage is per API call, so this cannot be attributed to single blocks.
+export function cacheSplit(usage) {
+  if (!usage) return null;
+  const read = usage.cacheRead ?? 0, write = usage.cacheWrite ?? 0, uncached = usage.input ?? 0, total = read + write + uncached;
+  return total ? { read, write, uncached, total, hitRate: read / total } : null;
+}
+// Totals over every request that reported usage.
+export function sessionCache(requests) {
+  let read = 0, write = 0, uncached = 0, count = 0;
+  for (const r of requests) { const c = cacheSplit(r.usage); if (!c) continue; read += c.read; write += c.write; uncached += c.uncached; count++; }
+  const total = read + write + uncached;
+  return count ? { read, write, uncached, total, hitRate: total ? read / total : 0, requests: count } : null;
+}
 // The fill limit: the autocompact threshold when the session states one, else the window.
 export const limitOf = meta => meta.autocompactAt ?? meta.window;
 export const markerPercent = (idx, count) => count > 1 ? Math.max(0, Math.min(100, idx / (count - 1) * 100)) : 0;
