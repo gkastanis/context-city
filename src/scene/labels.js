@@ -1,6 +1,21 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
 import { colorFor, THEME } from './theme.js';
 export { wrapText } from './paging.js';
+import { wrapPixels, looksJson, jsonTokens, CONTINUED } from './paging.js';
+
+// Syntax colours chosen for dark ink on light paper.
+const JSON_INK = { key: '#0f4f86', string: '#1d6b34', number: '#a8461c', literal: '#7d2e94', punct: '#6d7a83', plain: '#1b2730' };
+function drawCodeLine(ctx, line, x, y) {
+  const continued = line.includes(CONTINUED);
+  if (!continued && !looksJson(line)) { ctx.fillStyle = JSON_INK.plain; ctx.fillText(line, x, y); return; }
+  const indent = line.match(/^ */)[0].length, cw = ctx.measureText(' ').width;
+  ctx.fillStyle = '#d6d0c0';
+  for (let k = 0; k < indent - (continued ? 2 : 0); k += 2) ctx.fillRect(x + k * cw + cw * .4, y - 2, 1.5, 21);
+  // A continued piece is almost always the rest of a long string value.
+  if (continued) { ctx.fillStyle = JSON_INK.string; ctx.fillText(line.replace(CONTINUED, ''), x, y); return; }
+  let cx = x;
+  for (const run of jsonTokens(line)) { ctx.fillStyle = JSON_INK[run.kind]; ctx.fillText(run.text, cx, y); cx += ctx.measureText(run.text).width; }
+}
 
 export function createLabels(container) {
   const root = document.createElement('div');
@@ -98,22 +113,43 @@ export function createLabels(container) {
 }
 
 // Meshes are cheap placeholders. Canvas/GPU allocation happens near the walker.
-export function textPage(title, subtitle, lines, color, compact = false) {
-  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(compact ? 2.6 : 6, compact ? 1 : 3),
-    new THREE.MeshBasicMaterial({ color: THEME.ground, side: THREE.DoubleSide }));
-  const edge=new THREE.Mesh(new THREE.PlaneGeometry(compact?2.66:6.06,compact?1.06:3.06),new THREE.MeshBasicMaterial({color:new THREE.Color(color).multiplyScalar(1.6),side:THREE.DoubleSide}));edge.position.z=-.01;mesh.add(edge);
+// Font loading gates the first canvas draw, including fallback after a failed load.
+let pageFontsReady = !globalThis.document?.fonts;
+export const pageFonts = globalThis.document?.fonts
+  // A stalled font download must not leave the sheets blank: fall back after 2.5 s.
+  ? Promise.race([Promise.allSettled([document.fonts.load('19px "IBM Plex Mono"'), document.fonts.load('600 28px "IBM Plex Sans"')]),
+      new Promise(resolve => setTimeout(resolve, 2500))]).then(() => { pageFontsReady = true; })
+  : Promise.resolve();
+export function pageMeasure() {
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = '19px "IBM Plex Mono", monospace';
+  return text => ctx.measureText(text).width;
+}
+export function textPage(title, subtitle, lines, color, compact = false, options = {}) {
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(compact ? 3.9 : 6, compact ? 1.05 : 3),
+    new THREE.MeshBasicMaterial({ color: '#f3f0e8', side: THREE.DoubleSide, toneMapped: false }));
+  const edge = new THREE.Mesh(new THREE.PlaneGeometry(compact ? 4.02 : 6.12, compact ? 1.17 : 3.12),
+    new THREE.MeshBasicMaterial({ color: '#48535b', side: THREE.DoubleSide, toneMapped: false }));
+  edge.position.z = -.025; mesh.add(edge);
   mesh.userData.buildTexture = () => {
+    if (!pageFontsReady) return null;
     const canvas = document.createElement('canvas');
-    canvas.width = compact ? 512 : 1024; canvas.height = compact ? 128 : 512;
-    const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
-    ctx.fillStyle = THEME.ground; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.strokeRect(2, 2, w - 4, h - 4);
-    ctx.textBaseline = 'top'; ctx.font = 'bold 26px sans-serif'; ctx.fillStyle = color;
-    ctx.fillText(title, 20, 16, w - 40);
-    ctx.font = '18px monospace'; ctx.fillStyle = THEME.muted; ctx.fillText(subtitle, 20, 52, w - 40);
-    ctx.font = '21px monospace'; ctx.fillStyle = THEME.ink;
-    lines.forEach((line, i) => ctx.fillText(line, 20, 90 + i * 23, w - 40));
+    const scale = options.quality?.() === 'low' ? 1 : 2;
+    canvas.width = 1024 * scale; canvas.height = (compact ? 276 : 512) * scale;
+    const ctx = canvas.getContext('2d'); ctx.scale(scale, scale);
+    ctx.fillStyle = '#f3f0e8'; ctx.fillRect(0, 0, 1024, 512);
+    ctx.fillStyle = color; ctx.fillRect(0, 0, 1024, compact ? 140 : 65);
+    ctx.textBaseline = 'top'; ctx.font = compact ? '600 52px "IBM Plex Sans", sans-serif' : '600 28px "IBM Plex Sans", sans-serif'; ctx.fillStyle = '#17232c';
+    const headings = wrapPixels(title, 936, t => ctx.measureText(t).width, compact ? 2 : 1);
+    headings.forEach((line, i) => ctx.fillText(line, 44, 17 + i * (compact ? 56 : 34)));
+    ctx.font = compact ? '36px "IBM Plex Sans", sans-serif' : '18px "IBM Plex Sans", sans-serif'; ctx.fillStyle = '#46525b';
+    wrapPixels(subtitle, 936, t => ctx.measureText(t).width, compact ? 2 : 1)
+      .forEach((line, i) => ctx.fillText(line, 44, (compact ? 160 : 78) + i * (compact ? 43 : 25)));
+    ctx.font = '19px "IBM Plex Mono", monospace'; ctx.fillStyle = '#1b2730';
+    const wrapped = lines.flatMap(line => wrapPixels(line, 936, t => ctx.measureText(t).width));
+    wrapped.slice(0, 18).forEach((line, i) => drawCodeLine(ctx, line, 44, 111 + i * 21));
     const map = new THREE.CanvasTexture(canvas); map.colorSpace = THREE.SRGBColorSpace;
+    map.anisotropy = options.anisotropy ?? 1; map.generateMipmaps = true; map.minFilter = THREE.LinearMipmapLinearFilter;
     return map;
   };
   return mesh;

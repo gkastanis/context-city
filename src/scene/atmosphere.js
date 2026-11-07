@@ -32,7 +32,7 @@ export function createAtmosphere(scene, renderer, camera) {
   // Counters must include every pass, rather than just the last fullscreen quad.
   renderer.info.autoReset = false;
   scene.fog = new THREE.FogExp2('#2a3b5c',.0021);
-  let rangeStart=0, rangeEnd=0;
+  let rangeStart=0, rangeEnd=0, interior=false;
   let fill=0, target=0, time=0, quality=matchMedia('(pointer: coarse)').matches?'low':'high';
   const stops = [0,.5,.74,1], colors = ['#56769e','#7d6290','#c4804e','#c9545c'];
   const a=new THREE.Color(), b=new THREE.Color();
@@ -42,19 +42,19 @@ export function createAtmosphere(scene, renderer, camera) {
     setQuality(value) { quality=value; dust.geometry.setDrawRange(0,value==='high'?160:40); },
     resize(w,h) { composer.setSize(w,h); bloom.setSize(Math.ceil(w*.5),Math.ceil(h*.5)); },
     tick(dt,reduced,inside) {
-      time+=reduced?0:dt; fill += (target-fill)*(reduced?1:1-Math.exp(-dt*8));
+      interior=inside; time+=reduced?0:dt; fill += (target-fill)*(reduced?1:1-Math.exp(-dt*8));
       let i=0;while(i<2&&fill>stops[i+1])i++;
       const t=THREE.MathUtils.clamp((fill-stops[i])/(stops[i+1]-stops[i]),0,1);
       uniforms.horizon.value.copy(a.set(colors[i])).lerp(b.set(colors[i+1]),t);
       uniforms.zenith.value.copy(uniforms.horizon.value).multiplyScalar(.08);
-      scene.fog.color.copy(uniforms.horizon.value).multiplyScalar(inside?.25:.5);
-      scene.fog.density=inside?.022:Math.min(.0021,.45/Math.max(100,Math.hypot(camera.position.x,camera.position.y,camera.position.z-(rangeStart+rangeEnd)/2)));
+      if(inside)scene.fog.color.set('#eee8dc');else scene.fog.color.copy(uniforms.horizon.value).multiplyScalar(.5);
+      scene.fog.density=inside?0:Math.min(.0021,.45/Math.max(100,Math.hypot(camera.position.x,camera.position.y,camera.position.z-(rangeStart+rangeEnd)/2)));
       sky.position.copy(camera.position); stars.position.copy(camera.position);
       sky.visible=stars.visible=dust.visible=!inside;
       dust.position.z=camera.position.z-40; dust.position.y=Math.sin(time*.12)*2;
       return {time,fill};
     },
-    render() { renderer.info.reset(); if(quality==='high') composer.render();else renderer.render(scene,camera); },
+    render() { renderer.info.reset(); if(quality==='high'&&!interior) composer.render();else renderer.render(scene,camera); },
     dispose() { for(const pass of composer.passes) pass.dispose?.();composer.dispose(); },
   };
 }

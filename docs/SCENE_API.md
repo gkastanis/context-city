@@ -75,7 +75,7 @@ movement and orbit input. Playback completion reports `onModeChange('city', { re
 Focus the canvas for corridor movement: WASD or arrows move, drag looks,
 wheel walks, Escape exits. Doors work by clicks or local-space plane crossing,
 including side doors and previous doors. All door planes lie within walking
-bounds. Click an angled wall page to glide directly in front of it over 0.4 seconds (immediate under reduced motion). Walking or looking cancels the glide. Canvas keys do not handle keystrokes in UI controls.
+bounds. Click a wall sheet to glide directly in front of it over 0.4 seconds (immediate under reduced motion). Walking or looking cancels the glide. Canvas keys do not handle keystrokes in UI controls.
 
 `layoutRequest(session, requestIdx, opts = {})` in `src/layout.js` is pure and
 returns `{ items, districts, totalTokens, measured }`. `opts` is reserved.
@@ -97,7 +97,7 @@ Layer colors and labels are exported as `LAYERS`, `THEME`, `colorFor` from
 
 - Block corridors contain at most 12 content wall pages (18 lines each), followed by one final “Continues in the reader pane” page if truncated. Text and packed parameter descriptions share that allowance; absent parameter descriptions display “Description unavailable.” Complete block text remains in Session for the caller's reader pane.
 - District halls contain at most 24 doors total: 22 block doors and two navigation doors. More/Back page through blocks via the scene API and emit `onModeChange('inside', { district, page, owner, transitionId })`; at either end those doors lead to adjacent districts or the city.
-- Wall text textures are 1024×512; door labels are 512×128. Mesh placeholders allocate no canvas or GPU texture. Textures build within 30 units of the walker and dispose beyond 60, with hysteresis between those distances. Leaving or rebuilding an interior disposes all its resources. These limits bound interior texture memory independently of block count or text length.
+- Wall text textures are 2048 by 1024 on high quality and 1024 by 512 on low. Portal signs use the same pixel density with a shorter canvas. Mesh placeholders allocate no canvas or GPU texture. Textures build within 30 units of the walker and dispose beyond 60, with hysteresis between those distances. Leaving or rebuilding an interior disposes all its resources. These limits bound interior texture memory independently of block count or text length.
 - City labels use a fixed 62-span pool: at most 60 building/district labels plus two independent gate labels. Label text and widths are cached by block ID and rounded token count (20,000-record cap, reset on a new session) using a canvas, with no DOM layout reads in the frame loop. Sorted building positions use a binary search to find the ±110-unit candidate range. Candidate iteration stops at 60 placed labels after handling the two gates. Gate labels ignore layer filters. Gate geometry scales with window length so it remains visible in the full-window view.
 - Tool buildings split into description below and transparent schema above, with one floor per parameter; total height follows the token-size scale. User prompt blocks have tall thin beacons pulsing at the v1 frequency; reduced motion keeps their opacity fixed. Labels include the estimated (or proportionally scaled) token footprint.
 - Exterior bodies share a unit box geometry and use instanced batches per layer; glass, parameter floors and beacons use their own layer batches. Selection is a separate overlay. Batch capacity grows geometrically and is retained across scrubs, but `setSession` releases the old instance meshes and resets their capacity; no block owns a geometry or material. Picking clips the ray to the building envelope and binary-searches the token z range before intersecting candidate boxes.
@@ -332,3 +332,27 @@ budget. The first uncached T6 label implementation took 11.95 ms/call; caching
 short-label widths and ranking outside the frame loop restored the budget.
 SwiftShader's last city frame interval was 450.0 ms in the final resource run;
 this is one software-renderer sample, not a hardware GPU frame-rate claim.
+
+
+## Reading gallery (T10)
+
+Interiors use warm, lightly tinted walls, ceiling strips, a polished floor and a
+soft central runner. Interior fog has zero density and interiors render directly
+without bloom; city bloom is unchanged. No interior light casts shadows.
+Sheets sit at x = +/-5.82, parallel to the walls at +/-6.1, alternating sides
+every seven units. Frames stay at least 0.1 units inside the wall surface.
+
+IBM Plex font loading settles before canvas text is drawn. Body lines wrap by
+measured pixel width without horizontal squeezing. Text is canvas-only, with
+monospace and sans-serif fallbacks. Textures use mipmaps and the renderer's maximum
+anisotropy. Quality changes rebuild the current gallery at the selected resolution while
+preserving the walker pose. The 12 content page and one continuation page limit,
+30-unit allocation radius and 60-unit disposal radius still apply.
+
+Portal openings are 3.3 units wide and 3.8 high, with pillars and a lintel.
+Clicking any portal part or crossing its local plane inside that opening navigates.
+Destination signs show the block label, scaled token count and layer name.
+The entrance plaque and evenly spaced floor ruler use the current request's
+scaled layout token offsets; the plaque also reports the session window capacity.
+Portal gradients stop animating under reduced motion. Low quality omits wall
+light pools and uses fewer ruler ticks and ceiling strips when building a hall.

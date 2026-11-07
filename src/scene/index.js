@@ -54,7 +54,7 @@ export function createScene(container, callbacks = {}) {
   let intro = null, quality = matchMedia('(pointer: coarse)').matches ? 'low' : 'high', frameMs = 0;
   atmosphere.setQuality(quality); effects.setQuality(quality);
   const qualityMonitor = createQualityMonitor(level => {
-    quality = level; atmosphere.setQuality(level); effects.setQuality(level); emit('onQualityChange', level);
+    quality = level; atmosphere.setQuality(level); effects.setQuality(level); interior.setQuality(level); emit('onQualityChange', level);
   }, quality);
   let down = null, lastPointer = null, fullWindow = false, framing = null;
   const modes = createModes((mode, info) => emit('onModeChange', mode, info));
@@ -64,7 +64,8 @@ export function createScene(container, callbacks = {}) {
     if (type === 'block') api.enterBlock(id);
     else if (type === 'district') api.enterDistrict(id, page);
     else api.exitInside();
-  }, () => reduced);
+  }, () => reduced, renderer);
+  interior.setQuality(quality);
   scene.add(interior.group); interior.group.visible = false;
   const ray = new THREE.Raycaster(), pointer = new THREE.Vector2();
   const listeners = [];
@@ -299,7 +300,10 @@ export function createScene(container, callbacks = {}) {
     ray.setFromCamera(pointer, camera);
     if (modes.get() !== 'inside') return city.pick(ray);
     const objects = interior.group.children;
-    return ray.intersectObjects(objects, true).find(hit => hit.object.userData.action || hit.object.userData.blockId)?.object;
+    // The nearest surface stops the ray, so a sign cannot be clicked through the plaque or a sheet.
+    const hit = ray.intersectObjects(objects, true)[0];
+    for (let o = hit?.object; o && o !== interior.group; o = o.parent) if (o.userData.action || o.userData.blockId) return o;
+    return null;
   }
   for(const name of ['pointerdown','wheel','keydown']) listen(document,name,()=>cancelIntro(true),{capture:true});
   listen(canvas, 'pointerdown', e => {
