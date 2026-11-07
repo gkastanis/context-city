@@ -279,7 +279,7 @@ try {
       game.mode(value, details);
       reading = value === 'reading' ? (details.paused ? 'paused' : 'playing') : 'stopped'; updateReading();
     },
-    onError: error => { sceneStatus.hidden = false; sceneStatus.textContent = `3D view unavailable: ${error.message}. The index and reader remain available.`; },
+    onError: error => { sceneStatus.hidden = false; sceneStatus.textContent = `3D view unavailable: ${String(error.message ?? error).replace(/[.\s]+$/, '')}. The index and reader remain available.`; },
   });
   sceneReady = true; sceneStatus.hidden = true; updateInsets();
   if (session) { scene.setSession(session); if (session.requests.length) scene.setRequest(requestIdx); }
@@ -287,7 +287,10 @@ try {
   game.startIntro();
   scene.setReadingSpeed(Number(speed.value)); updateReading();
 } catch (error) {
-  sceneStatus.textContent = `3D view unavailable: ${error.message}. Use the index and reader to explore the transcript.`;
+  const reason = String(error.message ?? error).replace(/[.\s]+$/, '');
+  sceneStatus.textContent = `3D view unavailable: ${reason}. ` + (error.webglDisabled || /webgl/i.test(reason)
+    ? 'Turn on hardware acceleration in your browser settings (in Chrome: Settings, System, Use graphics acceleration when available), then reload. chrome://gpu or about:support shows whether WebGL is blocked. Meanwhile the index and reader work without it.'
+    : 'Use the index and reader to explore the transcript.');
   updateReading();
 }
 addEventListener('pagehide', () => { sceneRequests.reset(); activeLoad?.cancel(); hudObserver.disconnect(); game.dispose(); scene?.dispose(); });

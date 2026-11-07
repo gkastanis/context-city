@@ -21,8 +21,16 @@ export function createScene(container, callbacks = {}) {
     }
   };
   let renderer;
-  try { renderer = new THREE.WebGLRenderer({ antialias: true }); }
-  catch (err) { emit('onError', err); throw err; }
+  // Try lighter settings before giving up: some drivers refuse antialiasing or the default GPU choice.
+  const attempts = [{ antialias: true }, { antialias: false }, { antialias: false, powerPreference: 'low-power', depth: true, stencil: false }];
+  let lastError = null;
+  for (const options of attempts) { try { renderer = new THREE.WebGLRenderer(options); break; } catch (err) { lastError = err; } }
+  if (!renderer) {
+    const probe = document.createElement('canvas');
+    const anyWebGL = !!(probe.getContext('webgl2') || probe.getContext('webgl'));
+    const err = new Error(anyWebGL ? (lastError?.message ?? 'WebGL failed to start') : 'WebGL is turned off or blocked in this browser');
+    err.webglDisabled = !anyWebGL; emit('onError', err); throw err;
+  }
   const originalPosition = container.style.position;
   if (getComputedStyle(container).position === 'static') container.style.position = 'relative';
   const canvas = renderer.domElement;
