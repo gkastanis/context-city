@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.local.jsonl
+.codex-runs/
+site/
+test/private-words.local.txt
+dev/shots/

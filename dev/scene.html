@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context City · scene development</title>
+<link rel="icon" href="data:,">
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0a0e19; color: #e6e9f3; font: 14px system-ui; height: 100dvh; display: flex; flex-direction: column; }
+  nav { padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  button { padding: 8px 12px; cursor: pointer; }
+  #stage { flex: 1; min-height: 0; position: relative; }
+  #status { padding: 0 12px 12px; min-height: 32px; }
+</style>
+<nav aria-label="Scene checks">
+  <button id="overview">Overview</button><button id="full">Full 1M window</button>
+  <button id="read">Walk the input sequence</button><button id="pause">Pause</button>
+  <button id="resume">Resume</button><button id="stop">Stop</button>
+  <button id="enter">Enter block (large block in stress mode)</button><button id="district">Enter first district</button>
+  <button id="intro">Play intro</button><button id="celebrate">Celebrate</button><button id="event">Compaction effect</button><button id="quality">Toggle quality</button><label>Fill <input id="fill" type="range" min="0" max="1.2" step="0.01" value="0"></label><button id="exit">Exit</button><button id="reset">Reset sample</button>
+</nav>
+<pre id="stats" aria-live="off"></pre><div id="stage"></div><div id="status" role="status">Loading sample…</div>
+<script type="module">
+  const status = document.querySelector('#status');
+  try {
+    const { createScene } = await import('../src/scene/index.js');
+    const response = await fetch('../sample/fresh-session.json');
+    if (!response.ok) throw new Error(`Sample load: HTTP ${response.status}`);
+    const session = await response.json();
+    const stress = Math.max(0, Math.min(100000, Number(new URLSearchParams(location.search).get('stress')) || 0));
+    if (stress) {
+      session.blocks = {};
+      for (let i = 0; i < stress; i++) {
+        const id = `stress:${i}`, text = i === 1 ? 'Large result text for stress verification. '.repeat(4000).slice(0, 160000) : `Synthetic block ${i}`;
+        session.blocks[id] = { id, kind: i === 0 ? 'user_text' : 'tool_result', layer: i === 0 ? 'message' : 'results',
+          label: i === 1 ? '160 KB text block' : `Block ${i}`, text, chars: text.length, estTokens: Math.ceil(text.length / 4),
+          provenance: 'reconstructed', note: 'Synthetic stress data', role: 'user', toolName: i ? 'Read' : null };
+      }
+      const blockIds = Object.keys(session.blocks);
+      session.requests = [{ idx: 0, ts: null, blockIds, newBlockIds: blockIds, newFrom: 0, usage: null,
+        measuredTokens: null, estTokens: Object.values(session.blocks).reduce((n, b) => n + b.estTokens, 0) }];
+      session.events = []; session.meta.sessionId = 'synthetic-stress';
+    }
+    window.qualityChanges=[];let quality='high';
+    const api = createScene(document.querySelector('#stage'), {
+      dev: true,
+      onQualityChange(level) { quality=level;qualityChanges.push(level); },
+      onSelect(id) { if (id) status.textContent = `${session.blocks[id].label} · ${session.blocks[id].provenance}`; },
+      onModeChange(mode) { status.textContent = `Mode: ${mode}`; },
+      onReadPosition({ blockId, token }) { status.textContent = `${session.blocks[blockId].label} · ${Math.round(token)} tokens · reconstructed sample`; },
+      onError(err) { status.textContent = `3D error: ${err.message}`; console.error(err); },
+    });
+    api.setSession(session);
+    const actions = { overview: () => api.overview(), full: () => api.showFullWindow(), read: () => api.startReading(),
+      pause: () => api.pauseReading(), resume: () => api.resumeReading(), stop: () => api.stopReading(),
+      enter: () => api.enterBlock(session.requests[0].blockIds[stress > 1 ? 1 : 0]), district: () => api.enterDistrict(0),
+      intro: () => api.playIntro({onDone:r=>status.textContent=`Intro ${r.cancelled?'cancelled':'complete'}`}),
+      celebrate: () => api.celebrate(session.requests[0].blockIds[0]),
+      event: () => api.playEvent({type:'compaction',requestIdx:0,data:{preTokens:10000,postTokens:2000}}),
+      quality: () => { quality=quality==='high'?'low':'high';api.setQuality(quality); },
+      exit: () => api.exitInside(), reset: () => api.setSession(session) };
+    for (const [id, action] of Object.entries(actions)) document.getElementById(id).onclick = action;
+    document.querySelector('#fill').oninput=e=>api.setAtmosphere({fill:Number(e.target.value)});
+    const statsTimer = setInterval(() => { document.querySelector('#stats').textContent = `${stress ? `Stress: ${stress} blocks · ` : ''}${JSON.stringify(api.getStats())}`; }, 500);
+    addEventListener('pagehide', () => clearInterval(statsTimer), { once: true });
+    window.sceneAPI = api; // Manual request-diff and disposal checks in DevTools.
+    window.sampleSession = session;
+    addEventListener('pagehide', () => api.dispose(), { once: true });
+  } catch (err) { status.textContent = `Unable to start 3D: ${err.message}. Sample remains available at ../sample/fresh-session.json`; console.error(err); }
+</script>
+</html>

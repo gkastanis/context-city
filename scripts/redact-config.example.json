@@ -1,0 +1,6 @@
+{
+  "publicTools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "WebFetch", "WebSearch", "NotebookEdit", "TodoWrite", "Task", "Agent"],
+  "aliases": [{ "prefix": "mcp__example_server__", "alias": "mcp:site/" }],
+  "keepPrompts": [],
+  "keepDates": false
+}
