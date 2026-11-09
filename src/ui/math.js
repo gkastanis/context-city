@@ -36,7 +36,7 @@ export function eventLabel(event) {
   return label;
 }
 // Bound SVG complexity for long sessions while retaining every local min/max drop.
-export function sparkPoints(requests, windowSize, width = 600, height = 40) {
+export function sparkPoints(requests, windowSize, width = 600, height = 40, xAt = i => markerPercent(i, requests.length) * width / 100) {
   const points = [];
   const step = Math.max(1, Math.ceil(requests.length / width));
   const value = i => requests[i].measuredTokens ?? requests[i].estTokens;
@@ -48,7 +48,7 @@ export function sparkPoints(requests, windowSize, width = 600, height = 40) {
       if (value(i) > value(max)) max = i;
     }
     for (const i of [...new Set([start, min, max, end - 1])].sort((a, b) => a - b)) {
-      points.push(`${markerPercent(i, requests.length) * width / 100},${height * (1 - Math.min(1, value(i) / windowSize))}`);
+      points.push(`${xAt(i)},${height * (1 - Math.min(1, value(i) / windowSize))}`);
     }
   }
   return points.join(' ');
@@ -81,4 +81,20 @@ export function fuelState(total, limit, compacted = false) {
 // All usage remains measured; missing usage is omitted as in sessionCache.
 export function wholeSessionCache(session) {
   return sessionCache([session, ...(session.agents ?? []).map(a => a.session)].flatMap(s => s.requests));
+}
+
+// Interpolate absent request times and keep transcript clock corrections monotone.
+export function timelineTimes(times) {
+  const valid = times.map((t, i) => Number.isFinite(t) ? i : -1).filter(i => i >= 0);
+  if (valid.length < 2) return times.map((_, i) => i);
+  const filled = [...times];
+  let nextValid = 0;
+  for (let i = 0; i < times.length; i++) {
+    while (nextValid < valid.length && valid[nextValid] < i) nextValid++;
+    if (Number.isFinite(times[i])) continue;
+    const right = valid[nextValid], left = valid[nextValid - 1];
+    filled[i] = left == null ? times[right] : right == null ? times[left] : times[left] + (times[right] - times[left]) * (i - left) / (right - left);
+  }
+  for (let i = 1; i < filled.length; i++) filled[i] = Math.max(filled[i - 1], filled[i]);
+  return filled;
 }

@@ -2,6 +2,7 @@ import { el, button, svgEl } from './dom.js';
 import { formatTokens, sessionCache, wholeSessionCache } from './math.js';
 import { gameFacts, crossedEvents } from './game-model.js';
 import { findings } from './findings.js';
+import { agentStats, runLabel, durationLabel } from './agents.js';
 
 export function createGame({ call, jump, locate, showFindings = () => {}, summarySession = () => null, queueEvent = () => {} }) {
   let states = new WeakMap();
@@ -54,6 +55,10 @@ export function createGame({ call, jump, locate, showFindings = () => {}, summar
       for (const row of rows) row[0] += ' (main thread)';
       rows.push(['Subagent runs', source.agents.length],
         ['Subagent requests', source.agents.reduce((n, a) => n + a.session.requests.length, 0)]);
+      const stats = agentStats(source);
+      rows.push(['Longest subagent run', `${stats.longest.session.requests.length} requests (${runLabel(stats.longest)})`],
+        ['Most parallel subagents', stats.maxParallel]);
+      if (stats.foreground) rows.push(['Main thread waited for subagents', stats.waited == null ? 'Duration unavailable' : durationLabel(stats.waited)]);
       const whole = wholeSessionCache(source);
       if (whole) rows.push(['Whole session input', `${formatTokens(whole.total)} tokens: ${formatTokens(whole.read)} read from cache, ${formatTokens(whole.write)} written to cache, ${formatTokens(whole.uncached)} uncached (${(whole.hitRate * 100).toFixed(1)}% cache hit rate)`]);
     }

@@ -332,6 +332,7 @@ export function createScene(container, callbacks = {}) {
     const object = pick(e);
     if (object?.userData.action) object.userData.action();
     else if (object?.userData.blockId) api.select(object.userData.blockId);
+    else if (modes.get() === 'city') emit('onBackgroundClick');
   });
   listen(canvas, 'pointercancel', () => { down = null; lastPointer = null; });
   listen(canvas, 'pointerleave', () => setHover(null));

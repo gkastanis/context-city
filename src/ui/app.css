@@ -403,7 +403,7 @@ button.primary:hover { color: var(--accent); }
 }
 
 @media(min-width:761px) {
- #phone-menu > nav:first-child { position: absolute; top: max(16px, env(safe-area-inset-top, 0px)); right: var(--gutter-right); background: var(--glass); border: 1px solid var(--line); border-radius: 10px; padding: 7px; }
+ #phone-menu > nav:first-of-type { position: absolute; top: max(16px, env(safe-area-inset-top, 0px)); right: var(--gutter-right); background: var(--glass); border: 1px solid var(--line); border-radius: 10px; padding: 7px; }
 }
 
 .context-city-label--block::after { content: ''; position: absolute; left: 50%; top: 100%; height: var(--label-lift, 0px); width: 1px; background: var(--layer-color); opacity: .35; }
@@ -488,4 +488,102 @@ button.primary:hover { color: var(--accent); }
 @media (max-width: 760px) {
   #findings-panel { top: var(--run-content-top, 80px); }
   .show-findings #reader-panel { top: calc(var(--run-content-top, 80px) + 35% + 12px); }
+}
+
+/* Subagent intervals share the main sparkline scale. */
+#timeline.has-agent-lanes > svg, #timeline.has-agent-lanes #request-slider { left: 100px; width: calc(100% - 116px); }
+#timeline.has-agent-lanes .markers { left: 100px; right: 16px; }
+.agent-lanes { position: absolute; top: 98px; left: 16px; right: 16px; font-size: 11px; }
+.agent-lane-gutter { position: absolute; left: 0; top: 0; width: 80px; color: var(--muted); font-size: 10px; }
+.agent-lane-track { position: relative; margin-left: 84px; cursor: ew-resize; }
+#timeline svg.agent-graph { position: static; display: block; width: 100%; height: 100%; margin: 0; overflow: hidden; }
+.agent-main-line { stroke: var(--muted); fill: none; stroke-width: 1; }
+.agent-branch { cursor: pointer; color: var(--agent-color); outline: none; }
+.agent-branch-line, .agent-open-tail { stroke: currentColor; stroke-width: 1.5; }
+.agent-open-tail, .agent-branch-open .agent-branch-line { stroke-dasharray: 4 3; }
+.agent-branch-hit { fill: transparent; pointer-events: all; }
+.agent-branch-line, .agent-dot, .agent-open-tail { pointer-events: none; }
+.agent-branch-fill { fill: currentColor; opacity: .35; pointer-events: none; }
+.agent-dot { fill: currentColor; stroke: currentColor; }
+.agent-dot-open { fill: var(--panel); }
+.agent-branch-label { fill: currentColor; font-size: 9px; pointer-events: none; }
+.agent-branch:hover .agent-branch-line, .agent-branch:focus-visible .agent-branch-line { stroke-width: 3; filter: drop-shadow(0 0 3px currentColor); }
+.agent-branch:focus-visible .agent-dot { stroke: var(--ink); }
+.agent-lane-extra { display: none; }
+.agent-lane-cursor { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--focus); pointer-events: none; z-index: 4; transform: translateX(-1px); }
+.timeline-axis { display: inline-flex; gap: 0; }
+.timeline-axis button { border-radius: 0; }
+.timeline-axis [aria-pressed="true"] { background: var(--tools); color: var(--panel); }
+.time-break { stroke: var(--ink); stroke-width: 1.5; fill: none; vector-effect: non-scaling-stroke; }
+.agent-lane-toggle { display: block; margin: 4px 0 0 84px; min-height: 24px; padding: 1px 6px; font-size: 10px; }
+.agent-lane-tip { position: absolute; left: 84px; right: 0; bottom: calc(100% + 8px); z-index: 8; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; overflow-wrap: anywhere; pointer-events: none; }
+.agent-run-timing { position: absolute; top: 98px; left: 16px; right: 16px; color: var(--muted); font-size: 11px; }
+@media (max-width: 760px) {
+ #timeline.has-agent-lanes > svg, #timeline.has-agent-lanes #request-slider { left: 76px; width: calc(100% - 86px); }
+ .agent-lanes { top: 104px; left: 10px; right: 10px; }
+ .agent-lane-gutter { width: 62px; font-size: 9px; }
+ .agent-lane-track { margin-left: 66px; }
+ .agent-branch-label, .agent-branch-fill { display: none; }
+ .timeline-axis { position: absolute; top: 29px; right: 0; }
+ #timeline .timeline-axis button { min-height: 24px; padding: 1px 6px; font-size: 10px; }
+ .agent-lane-tip { left: 0; }
+ .agent-run-timing { top: 101px; left: 10px; right: 10px; font-size: 10px; }
+ #timeline.has-agent-lanes .markers { left: 76px; right: 10px; }
+}
+
+#app:has(#timeline.has-agent-lanes) #guess-card,
+#app:has(#timeline.has-agent-lanes) #discovery-toast,
+#app:has(#timeline.has-agent-lanes) #index-panel,
+#app:has(#timeline.has-agent-lanes) #reader-panel,
+#app:has(#timeline.has-agent-lanes) #field-guide,
+#app:has(#timeline.has-run-timing) #guess-card,
+#app:has(#timeline.has-run-timing) #discovery-toast,
+#app:has(#timeline.has-run-timing) #index-panel,
+#app:has(#timeline.has-run-timing) #reader-panel,
+#app:has(#timeline.has-run-timing) #field-guide { bottom: var(--findings-bottom, 250px); }
+
+#timeline > svg { overflow: hidden; }
+#timeline.time-axis #request-slider:focus-visible { opacity: 0; top: 40px; height: 52px; }
+@media (max-width: 760px) { #timeline.time-axis #request-slider:focus-visible { top: 65px; height: 37px; } }
+#timeline.time-axis:has(#request-slider:focus-visible) > svg { outline: 2px solid var(--focus); }
+#request-slider, .agent-lane-track { touch-action: none; }
+.timeline-selection { position: absolute; background: #4fc3d940; border: 1px solid var(--tools); pointer-events: none; z-index: 5; }
+.timeline-zoom-out { white-space: nowrap; }
+
+/* Keep the scene mode caption above the measured timeline panel. */
+#mode-label { bottom: var(--findings-bottom, 224px); }
+
+/* Let the visible rows set the panel height and the order of its footer. */
+#app #timeline { display: flex; flex-direction: column; height: auto; }
+#timeline > svg { position: static; flex: none; width: 100%; height: 50px; margin: 7px 0 0; }
+#timeline.has-agent-lanes > svg { width: calc(100% - 84px); margin-left: 84px; }
+#timeline .agent-lanes, #timeline .agent-run-timing { position: relative; top: auto; left: auto; right: auto; flex: none; margin: 4px 0 0; }
+#timeline .agent-lane-toggle { position: absolute; left: 0; top: 20px; width: 80px; margin: 0; white-space: normal; }
+#app #timeline .markers { position: relative; top: auto; left: auto; right: auto; flex: none; margin: 8px 0 0; }
+#timeline.has-agent-lanes .markers { margin-left: 84px; }
+#app #timeline .gauge { flex: none; margin-top: 5px; }
+#timeline .gauge-key { flex: none; margin-top: 3px; }
+#timeline .request-story { position: static; flex: none; height: auto; margin: 8px 0 0; font-size: 11px; line-height: 1.4; }
+#timeline .tape-tools { position: static; flex: none; margin-top: 8px; }
+@media (max-width: 760px) {
+ #timeline > svg { height: 32px; margin-top: 27px; }
+ #timeline.has-agent-lanes > svg { width: calc(100% - 66px); margin-left: 66px; }
+ #timeline.has-agent-lanes .markers { margin-left: 66px; }
+ #timeline .agent-lane-toggle { top: 14px; width: 62px; padding: 1px 2px; }
+ #timeline .request-story { margin-right: 38px; font-size: 10px; white-space: normal; max-height: 42px; }
+ .show-tape-tools #timeline .timeline-head { padding-bottom: 34px; }
+ #app.show-tape-tools #timelapse-rate, #app.show-tape-tools #pause-timelapse, #app.show-tape-tools #stop-timelapse { top: 60px; }
+ #timeline .camera-controls { padding-right: 38px; }
+}
+
+/* The latest panel stays above overlapping side panels, below Findings. */
+#app .panel.front-panel { z-index: 7; }
+/* Keep sheet close controls visible while their contents scroll. */
+.panel-heading { position: sticky; top: 0; z-index: 2; background: var(--panel); padding: 4px 0 10px; }
+.panel-heading h2 { min-width: 0; overflow-wrap: anywhere; }
+.panel-heading button { flex: none; }
+#reader-panel > .panel-heading { margin: 12px 16px 0; }
+#phone-menu .menu-heading { display: none; }
+@media (max-width: 760px) {
+  #phone-menu .menu-heading { display: flex; }
 }

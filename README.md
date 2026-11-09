@@ -74,6 +74,8 @@ Open `http://localhost:8000/index.html` for development, `http://localhost:8000/
 
 Built with Claude Code, Codex and Claude reviewers.
 
+Linked subagents form a branch graph beneath the sparkline, with By request and By time axes and compressed idle gaps.
+
 ## License
 
 MIT. Copyright (c) 2026 George Kastanis. See [LICENSE](LICENSE).

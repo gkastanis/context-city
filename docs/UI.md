@@ -318,3 +318,97 @@ type, and open the corresponding run and request. Unused tool checks include cal
 in all loaded threads. Run summary adds run and request counts plus whole-session
 input split by cache reads, writes and uncached input; existing totals are labelled
 main thread. Missing usage is omitted from measured totals.
+
+### Subagent branch graph and timeline axis
+
+Linked runs appear below the main sparkline as an SVG branch graph. Each branch
+curves from the main line at its first Agent call and returns when the completion
+enters the main context. Background launch acknowledgements do not complete a
+branch: its task notification does. Foreground results complete blocking runs.
+A hollow merge dot and dashed continuation mark an open run. Blocking runs that
+fork and merge at the same position hang from the main line as small loops,
+sized by request count with a cap. Unlinked runs stay in Index.
+
+By request uses the main request index. By time uses request timestamps, compressing
+idle gaps over 15 minutes into breaks capped at twelve pixels each and 20% of
+the total width. Nearby dense break marks merge. Gaps during foreground work
+remain active time. Sessions with only long gaps spread by request index. The
+sparkline, playhead, events, branch endpoints and seeking share the chosen scale.
+Missing times interpolate between timestamped neighbours. The axis preference is
+the only value saved in localStorage; transcript text is never saved. By time is
+disabled when fewer than two requests have timestamps.
+
+Overlapping branches use separate rows, packed for the chosen axis, with at most
+four rows shown initially. Show all rows expands the rest. Type keeps a stable
+colour. A thin area along each branch shows its own context fill. Hover and focus
+show type, description, request interval, request count, peak, cache hit rate,
+background or blocking execution, and duration when known. Left and right move
+between branches in fork order; Enter opens the run. Back restores the saved main
+request. Clicking empty graph space seeks the main tape. At 400px compact rows use a 10px pitch and separate row hit rectangles.
+Expanded rows use a 24px pitch. Labels and context fill hide on phones.
+
+Inside a run, a timing sentence gives the main fork and merge requests and times,
+duration, and execution mode. Run summary reports the longest loaded run, maximum
+parallel linked runs by time when available, and known foreground durations under
+Main thread waited for subagents when foreground runs exist.
+
+Shift-drag on the sparkline or branch strip selects a zoom range on the current
+axis. Two fingers select the range on a touch screen. Hold Ctrl while scrolling
+over the strip to zoom around the pointer. Zoom out restores the full session;
+Escape also restores it after native dialogs, Findings and Menu have handled Escape.
+The sparkline, branches, events and request cursor share the same range.
+On phones, expanded branch rows have separate 24px tap targets.
+
+
+## Closing panels and overlays (T13)
+
+Index, Reader and Field guide have a sticky heading row with Close. Close uses
+one shared panel state update, synchronizes the navigation button's aria-expanded,
+and returns focus to that button, or to Menu at widths of 760px and below.
+Opening any of these sheets on a narrow screen closes the other two and Menu.
+Toggling an already-open sheet closed also closes Menu and focuses its button.
+On wide screens the most recently opened panel sits above overlapping side panels.
+Selecting a block uses the same update to open Reader. Reader remembers whether
+navigation or a selection opened it. Selecting while a nav-opened Reader is open
+preserves that choice. Clicking empty ground in city mode clears the Index and
+city selection and shows Reader's empty state. It also closes Reader if a
+selection opened it; a nav-opened Reader stays open. Orbiting outside a sheet
+keeps working. The heading and Close stay visible while the sheet scrolls.
+
+One Escape handles one layer, in this order: native dialog (browser cancel),
+Findings, Menu, timeline zoom, walking inside or reading a block, then the most
+recently opened Reader, Field guide or Index panel on narrow screens, or a
+selection-opened Reader on desktop. Closing that desktop Reader with Escape
+also clears the selection. Nav-opened desktop panels remain open.
+The capture handler prevents a canvas key handler from closing another layer
+on the same press. Guess and the subagent banner use their visible Dismiss controls.
+Banner dismissal lasts until another session load, including a reload of the same
+file; switching between the main session and loaded subagent runs retains it.
+
+| City-covering element | Visible close control or automatic close | Escape |
+| --- | --- | --- |
+| Index | Close in sticky heading | After scene modes, narrow only |
+| Reader | Close in sticky heading; empty ground closes selection-opened Reader | After scene modes, narrow or selection-opened desktop Reader |
+| Field guide | Close in sticky heading | After scene modes, narrow only |
+| Findings | Close | Before Menu |
+| Run summary dialog | Close | Native dialog cancel |
+| Load example dialog | Close | Native dialog cancel |
+| Help and privacy dialog | Close | Native dialog cancel |
+| Add subagent runs dialog | Cancel, or choose files or folder | Native dialog cancel |
+| Phone Menu | Close, Menu toggle, or choose a sheet | Before zoom |
+| Subagent banner | Dismiss; included runs also remove it | No |
+| Subagent breadcrumb | Back to main session | No |
+| Guess card | Dismiss, Done after final answer, or invitation timeout | No |
+| City intro | Skip, navigation, or timed completion | Navigation interrupts it |
+| Discovery toast | Closes after 5.5 seconds | No |
+| File drag target | Drag leave, drop, or window blur | No |
+| Loading progress | Cancel, completion or failure | No |
+| Session numbers on phones | Context City title toggle | No |
+| Extra tape controls on phones | More toggle | No |
+| Timeline zoom | Zoom out | After Menu, before scene modes |
+| Event and branch tooltips | Pointer leave or focus leave | No |
+| Scene inside and reading modes | Exit inside and Stop in More controls | After zoom, before narrow sheets |
+
+`dev/t13-probe.mjs` checks close controls, visible focus restoration, Escape,
+phone panel exclusivity and browser errors at 400 by 860 and 1440 by 900 without
+mobile emulation. It runs against a local server on a port from 8790 to 8799.

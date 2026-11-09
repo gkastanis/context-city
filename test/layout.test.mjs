@@ -138,7 +138,8 @@ test('every tracked and new text file passes publication privacy checks', async 
   let count = 0;
   const hits = [];
   for (const file of files) {
-    const bytes = await readFile(new URL(file, root));
+    let bytes;
+  try { bytes = await readFile(new URL(file, root)); } catch (error) { if (error.code === 'ENOENT') continue; throw error; }
     if (bytes.includes(0)) continue;
     let text;
     try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { continue; }

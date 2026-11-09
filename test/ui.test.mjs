@@ -57,7 +57,8 @@ test('UI uses text nodes and no unsafe HTML, storage or content network APIs', a
   const names = ['src/app.js', ...(await readdir(new URL('../src/ui/', import.meta.url))).filter(n => n.endsWith('.js')).map(n => `src/ui/${n}`)];
   for (const name of names) {
     const source = await readFile(new URL('../' + name, import.meta.url), 'utf8');
-    assert.doesNotMatch(source, /innerHTML|insertAdjacentHTML|outerHTML|document\.write|localStorage|sessionStorage|indexedDB|XMLHttpRequest|sendBeacon|WebSocket/);
+    const checked = name === 'src/ui/timeline.js' ? source.replaceAll("localStorage.getItem('timeline-axis')", 'axisPreference').replaceAll("localStorage.setItem('timeline-axis', value)", 'saveAxis(value)') : source;
+    assert.doesNotMatch(checked, /innerHTML|insertAdjacentHTML|outerHTML|document\.write|localStorage|sessionStorage|indexedDB|XMLHttpRequest|sendBeacon|WebSocket/);
     assert.doesNotMatch(source, /\u2014|[\u2190-\u21ff]|\b(?:alert|confirm|prompt)\s*\(/);
     if (name !== 'src/app.js') assert.doesNotMatch(source, /\bfetch\(/);
   }

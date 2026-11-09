@@ -135,7 +135,9 @@ export function createParser(options = {}) {
   const shapes = new Map(), blobs = new Map(), requestById = new Map();
   const records = [], groups = new Map(), responseOrder = [], toolNames = new Map(), exactMessages = new Map();
   const dirtyGroups = new Set();
-  const resultRecords = new Map(), agentResults = new Map();
+  const resultRecords = new Map(), agentResults = new Map(), asyncResults = new Set();
+  const timestamps = [];
+  let recordPosition = 0;
   const resultTools = new Map(), nodes = new Map(), fallbackGroups = new Map(), promptEligibility = new Map(), promptTexts = new Map();
   let recentUsers = [], lastNode = null, sawApi = false, hasOrigins = false;
   const knownIgnored = new Set(['file-history-snapshot', 'summary', 'progress', 'queue-operation', 'system']);
@@ -182,7 +184,11 @@ export function createParser(options = {}) {
     const content = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? [];
     return content.flatMap(part => {
       const common = { role, provenance, ...(note ? { note } : {}) };
-      if (part.type === 'text') return splitText(part.text ?? '', role).map(piece => block({ ...piece, ...common }));
+      if (part.type === 'text') return splitText(part.text ?? '', role).map(piece => {
+        const notification = /<task-notification\b/i.test(piece.text)
+          ? [...piece.text.matchAll(/<(task-id|agent-id)>\s*([^<\s]+)\s*<\/\1>/gi)].map(match => match[2]) : [];
+        return block({ ...piece, ...common, ...(notification.length ? { notifies: [...new Set(notification)] } : {}) });
+      });
       if (part.type === 'tool_addition') {
         const definition = part.tool?.definition;
         if (definition) return [tool(definition, provenance, note)];
@@ -225,6 +231,9 @@ export function createParser(options = {}) {
     let r;
     try { r = JSON.parse(line); } catch { session.meta.skippedLines++; return; }
     if (!r || typeof r !== 'object' || Array.isArray(r)) { session.meta.skippedLines++; return; }
+    const position = recordPosition++;
+    const time = typeof r.timestamp === 'number' ? r.timestamp : Date.parse(r.timestamp);
+    if (Number.isFinite(time)) timestamps.push({ position, time });
     const meta = session.meta;
     meta.sessionId ??= r.sessionId ?? null;
     meta.cliVersion ??= r.version ?? null;
@@ -252,7 +261,7 @@ export function createParser(options = {}) {
       }
       meta.model ??= r.params?.model ?? null;
       current = { id: r.id, base: r.base, querySource: r.querySource, users: recentUsers, shapeHash: r.shapeHash, keep: r.keep ?? 0, tail: r.tail ?? [],
-        ts: r.timestamp ?? null, idx: records.length, usage: null, groups: [], events: pending };
+        ts: r.timestamp ?? null, position, idx: records.length, usage: null, groups: [], events: pending };
       pending = []; recentUsers = [];
       records.push(current);
       requestById.set(r.id, current);
@@ -284,7 +293,7 @@ export function createParser(options = {}) {
       if (message.id) {
         let g = fallbackGroups.get(message.id);
         if (!g) {
-          g = { parent, preApi: !sawApi, cutoff: nodes.size - 1, ts: r.timestamp ?? null, events: pending, usage: null, parts: new Map() };
+          g = { parent, preApi: !sawApi, cutoff: nodes.size - 1, position, ts: r.timestamp ?? null, events: pending, usage: null, parts: new Map() };
           fallbackGroups.set(message.id, g);
           if (!sawApi) pending = [];
         }
@@ -339,7 +348,8 @@ export function createParser(options = {}) {
         if (typeof r.toolUseResult?.agentId === 'string') {
           for (const id of ids) {
             const call = resultTools.get(id);
-            if (call) agentResults.set(call, r.toolUseResult.agentId);
+            if (call) { agentResults.set(call, r.toolUseResult.agentId);
+              if (r.toolUseResult.isAsync === true) asyncResults.add(call); }
           }
         }
         const hash = messageHash(r.message);
@@ -408,10 +418,14 @@ export function createParser(options = {}) {
       pending = [...carriedEvents, ...pending];
     }
     const messageChains = new Map();
+    let timestampIndex = 0;
     const mainOwners = new Set(mainRecords.map(r => r.idx));
     function addRequest(record, blockIds, newFrom) {
       const idx = session.requests.length;
-      session.requests.push({ idx, ts: record.ts, blockIds, newFrom,
+      while (timestampIndex + 1 < timestamps.length && timestamps[timestampIndex + 1].position <= record.position) timestampIndex++;
+      const before = timestamps[timestampIndex], after = timestamps[timestampIndex + 1];
+      const nearest = after && Math.abs(after.position - record.position) < Math.abs(before.position - record.position) ? after : before;
+      session.requests.push({ idx, ts: record.ts, time: nearest?.time ?? null, blockIds, newFrom,
         newBlockIds: [...new Set(blockIds.filter(id => !previousBlocks.has(id)))], usage: record.usage,
         measuredTokens: measured(record.usage),
         estTokens: blockIds.reduce((sum, id) => sum + session.blocks[id].estTokens, 0) });
@@ -648,6 +662,7 @@ export function createParser(options = {}) {
       if (result) {
         result.toolName = toolNames.get(callId) ?? null;
         if (agentResults.has(callId) && ['Agent', 'Task'].includes(result.toolName)) result.agentId = agentResults.get(callId);
+        if (asyncResults.has(callId) && ['Agent', 'Task'].includes(result.toolName)) result.async = true;
         result.label = result.toolName ? `${result.toolName} result` : 'Tool result';
       }
     }

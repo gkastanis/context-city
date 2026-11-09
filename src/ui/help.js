@@ -16,6 +16,7 @@ export function createHelp() {
     el('h3', {}, 'Privacy'),
     el('p', {}, 'The file is read inside this browser tab. Nothing is uploaded or stored. Closing the tab forgets it. The page downloads the 3D library (three.js) from a public CDN and fonts from Google Fonts; no transcript content goes anywhere. Transcripts can contain secrets and private text. Share screenshots with care.'),
     el('h3', {}, 'Explore'),
+    el('p', {}, 'Click empty ground or press Escape to close the reader.'),
     el('p', {}, 'Drag to orbit, scroll or pinch to zoom. Click an index block to fly to it. Press Enter or double click to enter. Inside, focus the city and use WASD or arrow keys to walk. Escape exits. Use the request slider or Previous and Next to move through requests. Tab to the event list, use arrow keys to move between events, and press Enter to jump.'),
     el('p', {}, 'Measured totals come from API usage. Block shares are estimates scaled to that total. The example uses illustrative estimates and reconstructed text. Older transcripts without request snapshots show an unknown prefix. To include subagents, pick the project folder or drop the session .jsonl together with its <session-id> folder. Other sessions in the folder are ignored.'));
   return { root: dialog, open() { dialog.showModal(); } };

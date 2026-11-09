@@ -58,6 +58,8 @@ Block = {
   toolName,                         // tool_def, tool_use, tool_result and result images: the tool's name
   toolUseId,                        // optional: call ID on tool_use, tool_result and result images
   agentId,                          // optional plain string on an Agent/Task result, from toolUseResult.agentId
+  async,                            // true only when that result has toolUseResult.isAsync === true
+  notifies,                         // optional array of all agent IDs from task-notification task-id and agent-id tags
   params,                           // tool_def only: [{ name, required, type, description }]
   split,                            // tool_def only: { descTokens, schemaTokens }
 }
@@ -83,6 +85,7 @@ and tools added mid-session).
 Request = {
   idx,                              // 0-based within this thread
   ts,
+  time,                            // milliseconds since epoch from the defining record, or nearest timestamped record; null if none
   blockIds: [id],                   // the full context of this request, in the order the API
                                     // renders it: tool defs, then system blocks, then messages
   newBlockIds: [id],                // ids not present in the previous request
@@ -152,6 +155,18 @@ parseText(text: string, options?) -> Session      // convenience: splits lines, 
   Files are parsed and compacted sequentially rather than retained as raw text.
 - Events after the last request attach to `requestIdx = requests.length - 1` with
   `data.afterLast = true`.
+
+## Branch timing
+
+`agentBranches(session)` links each loaded run's first main Agent call (`fork`)
+to its completion (`merge`). Background launch results keep `async: true` and do
+not complete the branch. The first request containing its task notification does. Notifications can be
+recovered user strings or recorded system-role API message blobs.
+Foreground results complete the branch directly. An open branch ends at the last
+main request. `forkTime` and `mergeTime` use those requests; `runStart` and `runEnd`
+use the minimum and maximum times of the run's own requests. Unlinked runs remain
+in the list. Request and time lane packing use inclusive endpoints independently.
+Only IDs and timing scalars are added; notification text keeps its existing block.
 
 ## Privacy
 

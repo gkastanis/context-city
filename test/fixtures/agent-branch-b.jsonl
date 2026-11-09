@@ -1,0 +1,6 @@
+{"type": "api-request-shape", "shapeHash": "child", "shape": {"system": ["Synthetic run."], "tools": []}}
+{"type": "api-request-blob", "hash": "prompt", "message": {"role": "user", "content": "Review synthetic square."}}
+{"type": "api-request", "id": "child-0", "isSidechain": true, "agentId": "b", "querySource": "agent:custom:reviewer", "shapeHash": "child", "timestamp": "2026-01-01T00:02:00Z", "keep": 0, "tail": ["prompt"]}
+{"type": "assistant", "isSidechain": true, "agentId": "b", "requestRef": "child-0", "message": {"id": "child-answer-0", "role": "assistant", "content": [{"type": "text", "text": "Synthetic answer."}], "usage": {"input_tokens": 1000, "cache_read_input_tokens": 1000}}}
+{"type": "api-request", "id": "child-1", "isSidechain": true, "agentId": "b", "querySource": "agent:custom:reviewer", "shapeHash": "child", "timestamp": "2026-01-01T00:07:00Z", "keep": 0, "tail": ["prompt"]}
+{"type": "assistant", "isSidechain": true, "agentId": "b", "requestRef": "child-1", "message": {"id": "child-answer-1", "role": "assistant", "content": [{"type": "text", "text": "Synthetic answer."}], "usage": {"input_tokens": 1000, "cache_read_input_tokens": 1000}}}

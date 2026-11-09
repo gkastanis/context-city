@@ -1,3 +1,4 @@
+import { panelState, escapeAction } from './ui/overlay-state.js';
 import { agentCalls, linkedRun, runLabel } from './ui/agents.js';
 import { el, button } from './ui/dom.js';
 import { parseFiles, droppedFiles } from './ui/loader.js';
@@ -19,6 +20,10 @@ let session = null, scene = null, requestIdx = 0, lastSettled = -1, selected = n
 let sceneReady = false, loadGeneration = 0, reading = 'stopped';
 let layout = null, itemById = new Map();
 let pendingFinding = null;
+let bannerDismissed = false;
+let openPanels = [];
+let readerOpenedBy = 'nav';
+const panelClasses = { 'index-panel': 'hide-index', 'reader-panel': 'hide-reader', 'field-guide': 'hide-guide' };
 let mainSession = null, activeRun = null, mainPosition = 0, mainSelected = null, addMode = false;
 const call = (method, ...args) => {
   try { if (typeof scene?.[method] === 'function') return scene[method](...args); } catch (error) { status.textContent = `Unable to navigate: ${error.message}`; }
@@ -40,7 +45,8 @@ const addPicker = el('dialog', { id: 'add-agents-picker', 'aria-label': 'Add sub
   button('Pick the project folder', () => { addMode = true; addPicker.close(); folderInput.click(); }),
   button('Cancel', () => addPicker.close()));
 const agentBanner = el('div', { id: 'subagent-banner', hidden: true }, el('p'),
-  button('Include subagent runs', () => addPicker.showModal()));
+  button('Include subagent runs', () => addPicker.showModal()),
+  button('Dismiss', () => { bannerDismissed = true; agentBanner.hidden = true; focusNavigation(); }));
 const breadcrumbText = el('span');
 const breadcrumb = el('div', { id: 'subagent-breadcrumb', hidden: true }, breadcrumbText,
   button('Back to main session', () => switchRun(null), { id: 'back-main' }));
@@ -56,8 +62,8 @@ const enter = id => { game.enter(id); call('enterBlock', id); };
 const reader = createReaderPane(enter, { linked: block => linkedRun(session, block), openRun: switchRun });
 const index = createContextIndex({ fly: id => { select(id); call('flyToBlock', id); },
   enter: id => { select(id); enter(id); }, filter: (layer, visible) => call('setLayerVisible', layer, visible) });
-index.root.prepend(agentList);
-const timeline = createTimeline(jump);
+index.root.querySelector('h2').after(agentList);
+const timeline = createTimeline(jump, switchRun);
 let pendingEvents = [];
 const game = createGame({ call, jump, summarySession: () => mainSession, showFindings: () => findingPanel.open(), queueEvent: event => pendingEvents.push(event), locate(id) {
   const idx = findBlockRequest(session, id);
@@ -84,18 +90,35 @@ const statValues = Array.from({ length: 4 }, () => el('b'));
 const stats = el('div', { class: 'stats', 'aria-label': 'Session numbers' }, ...['Context now', 'Of the window', 'Room left', 'Requests'].map((label, i) => el('div', { class: 'stat' }, statValues[i], el('span', {}, label))));
 const workspace = el('main', { id: 'workspace' }, index.root,
   el('section', { id: 'city', 'aria-label': 'City view' }, stage, sceneStatus), reader.root);
-function panelToggle(label, target, cls) {
-  const toggle = button(label, () => {
-    const open = toggle.getAttribute('aria-expanded') !== 'true';
-    toggle.setAttribute('aria-expanded', String(open)); app.classList.toggle(cls, !open);
-    if (narrow.matches && open && target !== 'timeline') {
-      for (const [other, hide] of [['reader-panel', 'hide-reader'], ['index-panel', 'hide-index'], ['field-guide', 'hide-guide']]) {
-        if (other === target) continue;
-        document.querySelector(`[aria-controls="${other}"]`)?.setAttribute('aria-expanded', 'false'); app.classList.add(hide);
-      }
-    }
+function focusNavigation(target) {
+  (narrow.matches ? menuToggle : app.querySelector(`[aria-controls="${target}"]`) ?? document.getElementById('load-transcript')).focus({ preventScroll: true });
+}
+function closeMenu(restoreFocus = false) {
+  app.classList.remove('show-menu'); menuToggle.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) menuToggle.focus({ preventScroll: true });
+}
+function setPanel(target, open, restoreFocus = false, openedBy = 'nav') {
+  if (target === 'reader-panel' && open && (openedBy === 'nav' || !openPanels.includes(target))) readerOpenedBy = openedBy;
+  openPanels = panelState(openPanels, target, open, narrow.matches);
+  for (const [id, cls] of Object.entries(panelClasses)) {
+    const shown = openPanels.includes(id);
+    app.classList.toggle(cls, !shown);
+    document.getElementById(id)?.classList.toggle('front-panel', id === openPanels[openPanels.length - 1]);
+    app.querySelector(`[aria-controls="${id}"]`)?.setAttribute('aria-expanded', String(shown));
+  }
+  if (narrow.matches) closeMenu();
+  if (restoreFocus) focusNavigation(target);
+}
+function panelToggle(label, target) {
+  return button(label, () => {
+    const open = !openPanels.includes(target);
+    setPanel(target, open);
+    if (open) {
+      const panel = document.getElementById(target);
+      panel.scrollTop = 0;
+      panel.querySelector('.panel-heading button').focus({ preventScroll: true });
+    } else if (narrow.matches) focusNavigation(target);
   }, { 'aria-controls': target, 'aria-expanded': 'false' });
-  return toggle;
 }
 const pause = button('Pause', () => {
   if (reading === 'paused') { call('resumeReading'); reading = 'playing'; }
@@ -119,8 +142,8 @@ app.append(el('header', { class: 'card topbar' }, el('div', { class: 'identity' 
     button('Pick the project folder', () => { addMode = false; folderInput.click(); }, { id: 'load-folder' }),
     button('Load example', () => exampleChooser.showModal(), { id: 'load-example' }), button('Help and privacy', () => help.open(), { id: 'help' })), fileInput, folderInput),
   el('div', { class: 'session-messages' }, notice, quiet, status, loading),
-  el('nav', { class: 'viewbar', 'aria-label': 'View controls' }, panelToggle('Index', 'index-panel', 'hide-index'),
-    panelToggle('Reader', 'reader-panel', 'hide-reader'), panelToggle('Field guide 0 of 9', 'field-guide', 'hide-guide'), button('Run summary', () => game.summary()), findingPanel.toggle, button('Guess', () => game.toggleGuess()), mode),
+  el('nav', { class: 'viewbar', 'aria-label': 'View controls' }, panelToggle('Index', 'index-panel'),
+    panelToggle('Reader', 'reader-panel'), panelToggle('Field guide 0 of 9', 'field-guide'), button('Run summary', () => game.summary()), findingPanel.toggle, button('Guess', () => game.toggleGuess()), mode),
   exampleChooser, addPicker, breadcrumb, agentBanner, workspace, game.guide, game.guess, game.intro, game.toast, game.summaryDialog, findingPanel.root,
   el('section', { class: 'card walk-controls', 'aria-label': 'Walk the sequence' }, el('strong', {}, 'Walk the sequence'), start, pause, stop,
     el('label', { for: 'reading-speed' }, 'Speed'), speed, speedLabel), timeline.root, help.root);
@@ -131,12 +154,22 @@ const titleToggle = button('CONTEXT CITY', () => {
 }, { id: 'title-toggle', 'aria-expanded': 'false', 'aria-label': 'Context City. Show session numbers' });
 app.querySelector('.identity').prepend(titleToggle, compactContext);
 const menu = el('div', { id: 'phone-menu' });
-menu.append(app.querySelector('.topbar nav'), app.querySelector('.viewbar'));
+menu.append(el('div', { class: 'help-heading menu-heading' }, el('h2', {}, 'Menu'), button('Close', () => closeMenu(true), { 'aria-label': 'Close Menu' })), app.querySelector('.topbar nav'), app.querySelector('.viewbar'));
 const menuToggle = button('Menu', () => {
   const open = menuToggle.getAttribute('aria-expanded') !== 'true';
   menuToggle.setAttribute('aria-expanded', String(open)); app.classList.toggle('show-menu', open);
 }, { id: 'menu-toggle', 'aria-controls': 'phone-menu', 'aria-expanded': 'false' });
 app.append(menu, menuToggle);
+for (const [panel, name] of [[index.root, 'Index'], [reader.root, 'Reader'], [game.guide, 'Field guide']]) {
+  const title = panel.querySelector('h2');
+  const heading = el('div', { class: 'help-heading panel-heading' }, title,
+    button('Close', () => setPanel(panel.id, false, true), { 'aria-label': `Close ${name}` }));
+  panel.prepend(heading);
+}
+// A dismissed card must not leave keyboard focus in hidden content.
+new MutationObserver(() => {
+  if (game.guess.hidden && game.guess.contains(document.activeElement)) focusNavigation();
+}).observe(game.guess, { attributes: true, attributeFilter: ['hidden'] });
 const drop = el('div', { id: 'drop-overlay', hidden: true }, el('strong', {}, 'Drop a Claude Code transcript'), el('span', {}, '.jsonl or .json, read only in this tab'));
 app.append(drop);
 timeline.root.querySelector('.timeline-head').prepend(game.play, game.rate, game.pause, game.stop);
@@ -151,6 +184,7 @@ tapeTools.id = 'tape-tools';
 timeline.root.append(tapeTools, tapeToggle);
 app.querySelector('.identity').append(el('div', { class: 'session-meta' }, info, status), loading, notice, redactedNotice);
 function applyPanelState() {
+  openPanels = [];
   app.classList.remove('show-menu', 'show-tape-tools', 'show-numbers');
   titleToggle.setAttribute('aria-expanded', 'false');
   app.classList.add('hide-reader', 'hide-index', 'hide-guide');
@@ -194,13 +228,18 @@ function select(id, hover = false, reveal = true) {
   selected = id;
   if (id && reveal) {
     game.select(id);
-    app.classList.remove('hide-reader');
-    document.querySelector('[aria-controls="reader-panel"]').setAttribute('aria-expanded', 'true');
-    if (narrow.matches) { app.classList.add('hide-index', 'hide-guide');
-      for (const target of ['index-panel', 'field-guide']) document.querySelector(`[aria-controls="${target}"]`).setAttribute('aria-expanded', 'false'); }
+    setPanel('reader-panel', true, false, 'select');
   }
   const shown = selected;
   reader.show(session.blocks[shown] ?? null, tokens(shown));
+}
+function clearSelection() {
+  select(null);
+  call('select', null);
+}
+function backgroundClick() {
+  clearSelection();
+  if (readerOpenedBy === 'select') setPanel('reader-panel', false);
 }
 function renderIndex() {
   if (!layout) return;
@@ -248,7 +287,7 @@ function jump(value, settled = false) {
 }
 function renderAgents() {
   const runs = mainSession?.agents ?? [], ids = agentCalls(mainSession);
-  agentBanner.hidden = !!activeRun || !!runs.length || !ids.length;
+  agentBanner.hidden = bannerDismissed || !!activeRun || !!runs.length || !ids.length;
   agentBanner.querySelector('p').textContent = `This session ran ${ids.length} ${ids.length === 1 ? 'subagent' : 'subagents'}. Their work is stored separately. Pick the project folder or drop the session .jsonl together with its <session-id> folder to include them. Other sessions are ignored.`;
   breadcrumb.hidden = !activeRun;
   app.classList.toggle('viewing-run', !!activeRun);
@@ -257,7 +296,7 @@ function renderAgents() {
   agentList.replaceChildren(el('h2', {}, 'Subagents'), ...runs.map(run => {
     const cache = sessionCache(run.session.requests);
     const total = cache ? `${formatTokens(cache.total)} input tokens, ${(cache.hitRate * 100).toFixed(1)}% cache hit rate` : 'Input tokens and cache hit rate unavailable';
-    const row = button('', () => switchRun(run), { class: 'subagent-row', 'data-agent-id': run.agentId });
+    const row = button('', () => switchRun(run, { kind: 'list', agentId: run.agentId }), { class: 'subagent-row', 'data-agent-id': run.agentId });
     if (run.agentId === activeRun?.agentId) {
       row.setAttribute('aria-current', 'true'); row.append(el('span', { class: 'viewing-label' }, 'Viewing'));
     }
@@ -266,27 +305,25 @@ function renderAgents() {
     return row;
   }));
 }
-function switchRun(run) {
+let runReturnTarget = null;
+function switchRun(run, returnTarget = null) {
   if (!mainSession) return;
   const left = activeRun;
+  if (run && !activeRun) runReturnTarget = returnTarget;
   if (!activeRun) { mainPosition = requestIdx; mainSelected = selected; }
   activeRun = run;
   setSession(run?.session ?? mainSession, true);
   if (!run) {
     jump(mainPosition, true);
     if (mainSelected && itemById.has(mainSelected)) select(mainSelected, false, false);
-    app.classList.remove('hide-index');
-    if (narrow.matches) {
-      app.classList.add('hide-reader', 'hide-guide');
-      for (const target of ['reader-panel', 'field-guide']) document.querySelector(`[aria-controls="${target}"]`).setAttribute('aria-expanded', 'false');
-    }
-    document.querySelector('[aria-controls="index-panel"]').setAttribute('aria-expanded', 'true');
+    setPanel('index-panel', true);
     const row = [...agentList.querySelectorAll('.subagent-row')].find(n => n.dataset.agentId === left?.agentId);
-    row?.focus({ preventScroll: true });
+    if (runReturnTarget?.kind === 'graph') timeline.focusBranch(runReturnTarget.agentId);
+    else row?.focus({ preventScroll: true });
   } else breadcrumb.querySelector('button').focus({ preventScroll: true });
 }
 function setSession(value, navigating = false) {
-  if (!navigating) { mainSession = value; activeRun = null; mainPosition = 0; }
+  if (!navigating) { bannerDismissed = false; mainSession = value; activeRun = null; mainPosition = 0; }
   renderAgents();
   pendingFinding = null;
   sceneRequests.reset(); pendingEvents = []; reader.reset(value.meta.redacted === true); lastSettled = -1;
@@ -303,7 +340,7 @@ function setSession(value, navigating = false) {
   info.title = `${meta.skippedLines || 0} skipped lines · ${meta.sidechainRequests || 0} subagent requests not shown`;
   game.setSession(session, navigating);
   findingPanel.setSession(mainSession);
-  timeline.setSession(session); timeline.update(0); call('setSession', session);
+  timeline.setSession(session, mainSession, activeRun); timeline.update(0); call('setSession', session);
   if (session.requests.length) { jump(0, true); if (sceneReady && !navigating) game.startIntro(); }
   else {
     index.root.querySelector('#context-districts').replaceChildren(); reader.show(null);
@@ -360,22 +397,37 @@ document.addEventListener('drop', async event => {
   catch (error) { status.textContent = `Unable to read folder: ${error.message}`; }
 });
 addEventListener('blur', () => { dragDepth = 0; drop.hidden = true; });
+// Priority is shared with the pure helper: native dialog, Findings, Menu,
+// zoom, inside or reading scene mode, then the newest panel on narrow screens
+// or a selection-opened Reader on desktop.
+// Capture before canvas handlers so one press cannot also exit a scene mode.
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !findingPanel.root.hidden && !help.root.open && !exampleChooser.open && !addPicker.open && !game.summaryDialog.open) {
-    findingPanel.close(); event.preventDefault(); event.stopImmediatePropagation(); return;
-  }
-  if (event.key === 'Escape' && !help.root.open && !exampleChooser.open && !addPicker.open) {
-    app.classList.remove('show-menu'); menuToggle.setAttribute('aria-expanded', 'false');
+  if (event.key !== 'Escape') return;
+  const action = escapeAction({ dialog: !!app.querySelector('dialog[open]'),
+    findings: !findingPanel.root.hidden, menu: narrow.matches && app.classList.contains('show-menu'),
+    zoom: timeline.isZoomed(), mode: scene?.getMode(), narrow: narrow.matches, panels: openPanels, readerOpenedBy });
+  event.stopImmediatePropagation();
+  if (action === 'dialog') return; // Keep the browser's native cancel and focus restoration.
+  event.preventDefault();
+  if (action === 'findings') findingPanel.close();
+  else if (action === 'menu') closeMenu(true);
+  else if (action === 'zoom') timeline.resetZoom();
+  else {
     game.skipIntro(); game.pausePlayback();
-    if (scene?.getMode() === 'inside') call('exitInside');
-    else if (scene?.getMode() === 'reading') call('stopReading');
+    if (action === 'inside') call('exitInside');
+    else if (action === 'reading') call('stopReading');
+    else if (action) {
+      if (!narrow.matches && action === 'reader-panel' && readerOpenedBy === 'select') clearSelection();
+      setPanel(action, false, true);
+    }
   }
-});
+}, { capture: true });
 await loadExample();
 try {
   const { createScene } = await import('./scene/index.js');
   scene = createScene(stage, {
     onSelect: id => select(id), onHover: id => select(id, true),
+    onBackgroundClick: backgroundClick,
     onReadPosition: ({ blockId }) => { if (selected !== blockId) { select(blockId); index.reveal(blockId); } },
     onModeChange: (value, details) => {
       mode.textContent = value === 'reading' ? 'Walking the sequence' : value === 'inside' ? 'Inside a block' : 'City';
