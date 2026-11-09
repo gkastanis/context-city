@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
 import { bundle, build } from '../scripts/build.mjs';
+import { agentBranches } from '../src/ui/agents.js';
 import { expandSession } from '../src/ui/compact.js';
 
 test('standalone artifact bundles modules, worker and example with valid module syntax', async () => {
@@ -72,7 +73,7 @@ test('sample placeholder replacement preserves dollar patterns, script comments 
   await build();
 });
 
-test('both compact embedded examples preserve every request and approved text in both formats', async () => {
+test('all three compact embedded examples preserve every request and approved text in both formats', async () => {
   const artifact = await build();
   const pages = await build({ pages: true });
   assert.ok(pages.output.startsWith('<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'));
@@ -82,12 +83,19 @@ test('both compact embedded examples preserve every request and approved text in
   assert.equal(script(pages.output), script(artifact.output));
   assert.equal(pages.output.match(/<style>([\s\S]*?)<\/style>/)[1], artifact.output.match(/<style>([\s\S]*?)<\/style>/)[1]);
   const embedded = JSON.parse(artifact.output.match(/const exampleData = (.*); \/\* SAMPLE_DATA \*\//)[1]);
-  for (const [i, filename] of ['fresh-session.json', 'real-session-redacted.json'].entries()) {
+  for (const [i, filename] of ['fresh-session.json', 'real-session-redacted.json', 'agents-session.json'].entries()) {
     const original = JSON.parse(await readFile(new URL('../sample/' + filename, import.meta.url), 'utf8'));
     const wire = JSON.parse(embedded[i]);
     assert.ok(wire.requests.every(r => !Object.hasOwn(r, 'blockIds') && !Object.hasOwn(r, 'newBlockIds')));
-    assert.deepEqual(expandSession(wire), original);
+    const expanded = expandSession(wire);
+    assert.deepEqual(expanded, original);
     assert.ok(artifact.exampleSizes[i].after < artifact.exampleSizes[i].before);
+    if (i === 2) {
+      assert.ok(artifact.exampleSizes[i].after < 400000);
+      assert.equal(agentBranches(expanded).length, 5);
+      assert.equal(original.agents.length, 5);
+      assert.match(artifact.output, /Session with subagents/);
+    }
     if (i === 1) {
       assert.equal(original.requests.length, 224);
       assert.equal(Object.keys(original.blocks).length, 1114);

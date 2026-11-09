@@ -14,6 +14,8 @@ The opening session is `sample/fresh-session.json`, explicitly marked Example
 session. Load transcript accepts `.jsonl` and `.json` Claude Code record files.
 Drop a file anywhere, or use the picker. Load example opens a keyboard accessible chooser for the invented Lantern settings
 page and the real session that built this page, redacted before publication.
+The third choice, **Session with subagents**, follows PDF export for the fictional Lantern project with five helper runs, four in the background and one foreground review. It includes parallel branches, a 20 minute pause, cache usage and a verbose test report that produces a large result finding. Its text and usage counts are invented. `npm run sample:agents` writes temporary transcript and metadata files, reads them through `createParser`, and links them with `agentRun` and `attachAgents` before writing the bundled Session. Loading it preserves the saved timeline axis and opens Overview; the Metropolis button frames the districts.
+
 The opening choice remains the invented example. The real example has 224 requests,
 1,114 blocks, one compaction and MCP loads. Only 8 owner-approved prompts are
 readable. A quiet banner explains the redaction, and the reader labels removed
@@ -96,7 +98,7 @@ uses the same compact representation. Parsing still builds the parser's original
 request arrays in the worker before compaction; transfer avoids cloning those
 arrays, but does not remove the parser's transient peak memory.
 
-Both embedded examples remain compact wire JSON strings. Typed tapes serialize
+All three embedded examples remain compact wire JSON strings. Typed tapes serialize
 as integer arrays, then expandSession restores the selected tape and exposes lazy
 request getters with the same bounded cache used for uploaded files. Only the
 selected example is decoded into a Session. Shared block text is read directly

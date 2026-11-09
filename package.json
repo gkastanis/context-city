@@ -1,4 +1,4 @@
 {
   "type": "module",
-  "scripts": { "test": "node --test test/*.test.mjs", "build": "node scripts/build.mjs", "build:pages": "node scripts/build.mjs --pages" }
+  "scripts": { "sample:agents": "node scripts/make-agents-sample.mjs", "test": "node --test test/*.test.mjs", "build": "node scripts/build.mjs", "build:pages": "node scripts/build.mjs --pages" }
 }

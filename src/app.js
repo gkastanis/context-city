@@ -140,6 +140,7 @@ const exampleChooser = el('dialog', { id: 'example-chooser', 'aria-labelledby': 
   ...[
     ['Invented example: Lantern settings page', 'A short invented session with readable text and illustrative token counts.'],
     ['A real session, redacted: the session that built this page', '224 requests, one compaction and real tool loads, with 8 approved prompts.'],
+    ['Session with subagents', 'A feature built with five helper agents. Shows the branch graph, the Metropolis view and how much each helper kept out of the main context.'],
   ].map(([label, line], i) => el('section', {}, button(label, () => { exampleChooser.close(); loadExample(i); }, { id: `example-${i}` }), el('p', { class: 'muted' }, line))));
 const mode = el('span', { id: 'mode-label' }, 'City');
 app.append(el('header', { class: 'card topbar' }, el('div', { class: 'identity' }, el('h1', {}, 'CONTEXT CITY'), el('p', { class: 'subtitle' }, 'Explore the world inside a context window.'), stats, info),
@@ -391,7 +392,7 @@ async function loadExample(which = 0) {
     let value;
     if (exampleData != null) value = expandSession(JSON.parse(exampleData[which]), 8);
     else {
-      const response = await fetch(new URL(which === 1 ? '../sample/real-session-redacted.json' : '../sample/fresh-session.json', import.meta.url));
+      const response = await fetch(new URL(['../sample/fresh-session.json', '../sample/real-session-redacted.json', '../sample/agents-session.json'][which], import.meta.url));
       if (!response.ok) throw new Error(`Example load failed (${response.status})`);
       value = await response.json();
     }
