@@ -33,6 +33,50 @@ export function districtLayout(positions, branches, sizes, canal = canalWidth(po
 export function bridgeWidth(tokens) { return Math.min(3.5, Math.max(.3, Math.sqrt(Math.max(0, tokens)) * .035)); }
 export function districtBridgeWidth(tokens, footprint = 7) { return Math.max(.6 * footprint, bridgeWidth(tokens) * footprint); }
 
+// Bounds describe actual plots, not a tall cuboid over the entire canal.
+// Pending plots stay drawn but do not contribute to framing.
+export function metropolisBounds(layout, districts) {
+  const boxes = [{ x0: -3.5, x1: 3.5, z0: 0, z1: Math.max(1, layout.totalTokens * .01),
+    high: Math.max(12, ...layout.items.map(it => it.height)) }, ...districts.filter(r => r.state !== 'pending').map(r => ({
+    x0: r.y - r.depth / 2, x1: r.y + r.depth / 2,
+    z0: r.x - r.width / 2, z1: r.x + r.width / 2,
+    high: Math.max(.1, ...r.grid.cells.map(c => c.height)),
+  }))];
+  return { boxes, x0: Math.min(...boxes.map(b => b.x0)), x1: Math.max(...boxes.map(b => b.x1)),
+    z0: Math.min(...boxes.map(b => b.z0)), z1: Math.max(...boxes.map(b => b.z1)),
+    high: Math.max(...boxes.map(b => b.high)) };
+}
+
+// The convex skyline has the same perspective extrema as all main buildings.
+// Keep its corners rather than testing thousands of interior points per view.
+export function skylineCorners(layout) {
+  const points = layout.items.flatMap(it => [[it.z0, it.height], [it.z1, it.height]]);
+  points.push([0, 0], [layout.totalTokens * .01, 0]);
+  points.sort((a,b) => a[0]-b[0] || a[1]-b[1]);
+  const cross = (a,b,c) => (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
+  const half = values => { const hull=[];for(const p of values){while(hull.length>1&&cross(hull.at(-2),hull.at(-1),p)<=0)hull.pop();hull.push(p);}return hull.slice(0,-1); };
+  return [...half(points), ...half([...points].reverse())].flatMap(([z,y]) => [-3.5,3.5].map(x => ({x,y,z})));
+}
+
+// Largest axis-aligned canvas rectangle left unobstructed by visible HUD panels.
+export function freeViewport(width, height, panels) {
+  const rects=panels.map(r=>({x:Math.max(0,r.x),y:Math.max(0,r.y),
+    right:Math.min(width,r.x+r.w),bottom:Math.min(height,r.y+r.h)}))
+    .filter(r=>r.right>r.x&&r.bottom>r.y);
+  const xs=[...new Set([0,width,...rects.flatMap(r=>[r.x,r.right])])].sort((a,b)=>a-b);
+  let best={x:0,y:0,w:width,h:height},area=-1;
+  for(let i=0;i<xs.length-1;i++)for(let j=i+1;j<xs.length;j++){
+    const blocked=rects.filter(r=>r.x<xs[j]&&r.right>xs[i]).sort((a,b)=>a.y-b.y);
+    let top=0;
+    for(const r of [...blocked,{y:height,bottom:height}]){
+      const w=xs[j]-xs[i],h=r.y-top;
+      if(w*h>area){area=w*h;best={x:xs[i],y:top,w,h};}
+      top=Math.max(top,r.bottom);
+    }
+  }
+  return area>0?best:null;
+}
+
 export function runState(branch, mainIdx, mainTime, requests) {
   if (mainIdx < branch.fork) return { state: 'pending', idx: -1 };
   if (!branch.open && mainIdx >= branch.merge) return { state: 'merged', idx: requests.length - 1 };

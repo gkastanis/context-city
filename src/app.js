@@ -334,7 +334,7 @@ function switchRun(run, returnTarget = null) {
     else row?.focus({ preventScroll: true });
   } else breadcrumb.querySelector('button').focus({ preventScroll: true });
 }
-function setSession(value, navigating = false) {
+function setSession(value, navigating = false, startRequest = 0) {
   if (!navigating) { bannerDismissed = false; mainSession = value; activeRun = null; mainPosition = 0; }
   renderAgents();
   navigationRestoreIdx = null;
@@ -355,7 +355,13 @@ function setSession(value, navigating = false) {
   game.setSession(session, navigating);
   findingPanel.setSession(mainSession);
   timeline.setSession(session, mainSession, activeRun); timeline.update(0); call('setSession', session);
-  if (session.requests.length) { jump(0, true); if (sceneReady && !navigating) game.startIntro(); }
+  if (session.requests.length) {
+    jump(startRequest, true);
+    // Apply the opening request before the intro owns the camera. A queued
+    // request change would otherwise cancel its flight and captions next frame.
+    sceneRequests.reset(); call('setRequest', requestIdx, { restore: true });
+    if (sceneReady && !navigating) game.startIntro();
+  }
   else {
     index.root.querySelector('#context-districts').replaceChildren(); reader.show(null);
     ['0', '0.0%', formatTokens(limitOf(meta)), '0'].forEach((text, i) => { statValues[i].textContent = text; });
@@ -364,6 +370,7 @@ function setSession(value, navigating = false) {
   updateReading(); status.textContent = meta.sample ? 'Example session ready.' : 'Transcript ready. File read in this tab.';
 }
 async function loadFiles(files, adding = false) {
+  closeMenu();
   const generation = ++loadGeneration; activeLoad?.cancel();
   const retainedPosition = activeRun ? mainPosition : requestIdx;
   status.textContent = files.some(f => f.size > 300 * 1024 * 1024)
@@ -387,6 +394,7 @@ async function loadFiles(files, adding = false) {
 // The builder replaces this sentinel with data, not another retained Session.
 const exampleData = null; /* SAMPLE_DATA */
 async function loadExample(which = 0) {
+  closeMenu();
   const generation = ++loadGeneration; activeLoad?.cancel(); activeLoad = null; loading.hidden = true;
   try {
     let value;
@@ -396,7 +404,7 @@ async function loadExample(which = 0) {
       if (!response.ok) throw new Error(`Example load failed (${response.status})`);
       value = await response.json();
     }
-    if (generation === loadGeneration) setSession(value);
+    if (generation === loadGeneration) setSession(value, false, Number.isInteger(value.meta.startRequest) ? value.meta.startRequest : 0);
   } catch (error) { if (generation === loadGeneration) status.textContent = error.message; }
 }
 let dragDepth = 0;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { parseText } from '../src/parse.js';
 import { agentBranches, agentRun, attachAgents } from '../src/ui/agents.js';
-import { districtLayout, districtGrid, runState, bridgeWidth, canalWidth, districtBridgeWidth } from '../src/scene/metropolis-model.js';
+import { districtLayout, districtGrid, runState, bridgeWidth, canalWidth, districtBridgeWidth, metropolisBounds, skylineCorners, freeViewport } from '../src/scene/metropolis-model.js';
 import { layoutRequest } from '../src/layout.js';
 import { gameFacts } from '../src/ui/game-model.js';
 
@@ -88,4 +88,47 @@ test('missing fork anchors on merge, and absent anchors use the unlinked row',()
  assert.equal(rects[0].x,120);assert.equal(rects[0].linked,true);
  assert.ok(rects[1].x>200);assert.equal(rects[1].linked,false);
  assert.ok(rects.every(r=>r.y-r.depth/2>=10+canalWidth(200)));
+});
+
+test('example framing excludes pending plots and includes existing districts',async()=>{
+  const session=JSON.parse(await readFile(new URL('../sample/agents-session.json',import.meta.url),'utf8'));
+  const branches=agentBranches(session),positions={end:Math.max(...session.requests.map(r=>r.measuredTokens))*.01};
+  for(const b of branches){
+    for(const [id,idx] of [[b.forkBlockId,b.fork],[b.mergeBlockId,b.merge]]){
+      const item=layoutRequest(session,idx).items.find(it=>it.blockId===id);
+      positions[id]=(item.z0+item.z1)/2;
+    }
+  }
+  const sizes=session.agents.map(run=>{
+    const maxima=new Map();
+    run.session.requests.forEach((_,idx)=>layoutRequest(run.session,idx).items.forEach(it=>{
+      const old=maxima.get(it.blockId);
+      if(!old||it.height*(it.z1-it.z0)>old.height*(old.z1-old.z0))maxima.set(it.blockId,it);
+    }));
+    const grid=districtGrid([...maxima.values()]);
+    return {agentId:run.agentId,grid,width:grid.width,depth:grid.depth};
+  });
+  const districts=districtLayout(positions,branches,sizes);
+  const boxes=[0,session.requests.length-1].map(idx=>metropolisBounds(layoutRequest(session,idx),districts.map(r=>({...r,
+    state:runState(branches.find(b=>b.agentId===r.agentId),idx,session.requests[idx].time,session.agents.find(a=>a.agentId===r.agentId).session.requests).state}))));
+  const dimensions=b=>[b.x1-b.x0,b.z1-b.z0,b.high];
+  const [first]=boxes.map(dimensions);
+  first.forEach(n=>assert.ok(Number.isFinite(n)&&n>0));
+  assert.equal(boxes[0].boxes.length,1,'pending plots do not contribute to framing');
+  assert.ok(boxes[1].boxes.slice(1).some(b=>b.high>.1));
+});
+
+test('convex skyline retains actual building corners instead of empty tall end corners',()=>{
+  const layout={totalTokens:10000,items:[{z0:0,z1:10,height:100},{z0:10,z1:100,height:20}]};
+  const points=skylineCorners(layout);
+  assert.ok(points.some(p=>p.z===0&&p.y===100));
+  assert.ok(points.some(p=>p.z===100&&p.y===20));
+  assert.ok(!points.some(p=>p.z===100&&p.y===100));
+});
+
+test('free viewport excludes open panels and uses the largest remaining rectangle',()=>{
+  assert.equal(freeViewport(400,860,[{x:0,y:0,w:400,h:860}]),null);
+  assert.deepEqual(freeViewport(1440,900,[{x:0,y:0,w:400,h:110},{x:0,y:600,w:1440,h:300}]),{x:0,y:110,w:1440,h:490});
+  assert.deepEqual(freeViewport(400,860,[{x:0,y:0,w:400,h:140},{x:0,y:600,w:400,h:260}]),{x:0,y:140,w:400,h:460});
+  assert.deepEqual(freeViewport(1440,900,[{x:1000,y:0,w:440,h:900}]),{x:0,y:0,w:1000,h:900});
 });

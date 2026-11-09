@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createParser } from '../src/parse.js';
-import { agentRun, attachAgents } from '../src/ui/agents.js';
+import { agentRun, attachAgents, agentBranches } from '../src/ui/agents.js';
 import { compactSession } from '../src/ui/compact.js';
 
 // All words, paths, times and usage counts are invented for Lantern.
@@ -130,6 +130,9 @@ export async function makeAgentsSample() {
     const session = attachAgents(await parse(path.join(directory, 'lantern-pdf.jsonl')), children);
     session.meta.sample = true;
     session.meta.sessionId = 'fictional-lantern-pdf';
+    const branches = agentBranches(session);
+    const parallel = session.requests.map((_, idx) => branches.filter(b => idx >= b.fork && (b.open || idx < b.merge)).length);
+    session.meta.startRequest = parallel.indexOf(Math.max(...parallel));
     return session;
   } finally { await rm(directory, { recursive: true, force: true }); }
 }

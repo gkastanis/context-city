@@ -17,6 +17,9 @@ test('public Lantern PDF sample is deterministic and exercises linked transcript
   assert.equal(branches.filter(b => b.async).length, 4);
   assert.ok(branches.every(b => !b.open && b.forkBlockId && b.mergeBlockId));
   assert.ok(maxParallel(branches) >= 2);
+  const parallel = sample.requests.map((_, idx) => branches.filter(b => idx >= b.fork && (b.open || idx < b.merge)).length);
+  assert.equal(sample.meta.startRequest, parallel.indexOf(Math.max(...parallel)));
+  assert.equal(parallel[sample.meta.startRequest], 3);
   assert.ok(Math.max(...branches.map(b => b.lane)) >= 1);
   const times = sample.requests.map(r => r.time);
   assert.ok(times.some((t, i) => i > 0 && t - times[i - 1] > 15 * 60000));

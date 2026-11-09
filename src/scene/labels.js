@@ -1,10 +1,45 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
+import { freeViewport } from './metropolis-model.js';
 import { colorFor, THEME } from './theme.js';
 export { wrapText } from './paging.js';
 import { wrapPixels, looksJson, jsonTokens, CONTINUED } from './paging.js';
 
 // Syntax colours chosen for dark ink on light paper.
 const JSON_INK = { key: '#0f4f86', string: '#1d6b34', number: '#a8461c', literal: '#7d2e94', punct: '#6d7a83', plain: '#1b2730' };
+
+// Measure the HTML HUD only when its layout changes, never in update(). A
+// panel may move without resizing when an ancestor changes class (phone menu,
+// title expansion, timeline tools), so watch those visibility changes too.
+const HUD_PANELS = '.identity, #phone-menu, #phone-menu nav, #menu-toggle, #index-panel, #reader-panel, #field-guide, #findings-panel, #guess-card, #timeline, #subagent-breadcrumb, #subagent-banner, .session-messages, #city-intro, #discovery-toast, dialog';
+function hudOcclusion(container) {
+  const host = container.closest('#app') ?? container.parentElement;
+  const panels = [...host.querySelectorAll(HUD_PANELS)];
+  let rects = [], pending = 0, disposed = false;
+  function measure() {
+    pending = 0;
+    const origin = container.getBoundingClientRect();
+    rects = panels.filter(n => n.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map(n => n.getBoundingClientRect())
+      .filter(r => r.width > 0 && r.height > 0)
+      .map(r => ({ x: r.left-origin.left, y: r.top-origin.top, w: r.width, h: r.height }));
+  }
+  function schedule() { if (!disposed && !pending) pending = requestAnimationFrame(measure); }
+  const sizes = new ResizeObserver(schedule);
+  for (const panel of [container, ...panels]) sizes.observe(panel);
+  const changes = new MutationObserver(schedule);
+  const ancestors = new Set(panels);
+  for (const panel of panels) for (let n = panel.parentElement; n; n = n.parentElement) ancestors.add(n);
+  // Do not observe the scene subtree: its pooled labels write styles every
+  // frame. Panel content size changes are already covered by ResizeObserver.
+  for (const n of ancestors) changes.observe(n, { attributes: true, attributeFilter: ['class', 'hidden', 'open', 'style'] });
+  // Font metrics can change after the first resize notification.
+  document.fonts?.ready.then(schedule);
+  measure();
+  return {
+    measure, rects: () => rects,
+    intersects: (x,y,w,h) => rects.some(r => x < r.x+r.w && x+w > r.x && y < r.y+r.h && y+h > r.y),
+    dispose() { disposed = true; sizes.disconnect(); changes.disconnect(); cancelAnimationFrame(pending); },
+  };
+}
 function drawCodeLine(ctx, line, x, y) {
   const continued = line.includes(CONTINUED);
   if (!continued && !looksJson(line)) { ctx.fillStyle = JSON_INK.plain; ctx.fillText(line, x, y); return; }
@@ -22,6 +57,8 @@ export function createLabels(container) {
   Object.assign(root.style, { position: 'absolute', inset: '0', pointerEvents: 'none', overflow: 'hidden' });
   root.className='context-city-labels';
   root.setAttribute('aria-hidden', 'true'); container.append(root);
+  const hud = hudOcclusion(container);
+  let freeCache=null, freeRects=null, freeWidth=0, freeHeight=0;
   const measure = document.createElement('canvas').getContext('2d');
   // A fixed pool, rather than a DOM node for each block.
   const pool = Array.from({ length: 62 }, () => {
@@ -92,7 +129,7 @@ export function createLabels(container) {
       if (!r.story && !r.district && camera.position.distanceTo(r.position) > 110) continue;
       const p = r.position.clone(); if (!r.gate && !r.tick && !r.agent) p.y *= heightScale; p.project(camera);
       if (p.z < -1 || p.z > 1) continue;
-      const w = r.width, h = r.district ? 25 : 22;
+      const w = r.width + 2, h = r.district ? 27 : 22;
       let x = (p.x + 1) * width / 2 - w / 2, y = (1 - p.y) * height / 2 - h;
       const anchorY = y;
       if(r.gate && Math.abs(p.x)<1.2 && Math.abs(p.y)<1.2){x=Math.max(4,Math.min(width-w-4,x));y=Math.max(4,Math.min(height-h-4,y));}
@@ -100,6 +137,7 @@ export function createLabels(container) {
       const overlaps = () => occupied.some(b => x < b.x + b.w + 8 && x + w + 8 > b.x && y < b.y + b.h + 6 && y + h + 6 > b.y);
       if (r.story) for (let n=0; n<5 && overlaps(); n++) y -= 28;
       if (y < (r.story ? Math.max(4, topInset) : 4) || (!r.gate && overlaps())) continue;
+      if (hud.intersects(x,y,w,h)) continue;
       occupied.push({ x, y, w, h });
       const el = pool[used++]; if (!r.gate) count++;
       // Keep district chips from adding DOM style writes while the camera rests.
@@ -116,7 +154,15 @@ export function createLabels(container) {
     }
     for (; used < pool.length; used++) pool[used].style.display = 'none';
   }
-  return { set, update, dispose() { root.remove(); cache.clear(); previousSession = null; ranked = []; buildings = []; districts = []; gates = []; } };
+  return { set, update, freeRegion(width,height,refresh=true) {
+      if(refresh)hud.measure();
+      if(freeRects!==hud.rects()||freeWidth!==width||freeHeight!==height){
+        const next=freeViewport(width,height,hud.rects());
+        if(!next||!freeCache||Object.keys(next).some(k=>next[k]!==freeCache[k]))freeCache=next;
+        freeRects=hud.rects();freeWidth=width;freeHeight=height;
+      }
+      return freeCache;
+    }, dispose() { hud.dispose(); root.remove(); cache.clear(); previousSession = null; ranked = []; buildings = []; districts = []; gates = []; } };
 }
 
 // Meshes are cheap placeholders. Canvas/GPU allocation happens near the walker.

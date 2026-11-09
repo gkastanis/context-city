@@ -1,5 +1,11 @@
 # Session contract
 
+Bundled examples may set `session.meta.startRequest` to a zero-based request index.
+The example loader applies it before the usual intro. Uploaded transcripts still
+open at request zero. The fictional subagent example chooses the earliest request
+with the most running branches.
+
+
 Every module talks through one data structure: `Session`. The parser produces it,
 the layout reads it, the scene and UI render it. Nothing else crosses module lines.
 

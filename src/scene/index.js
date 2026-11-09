@@ -13,6 +13,7 @@ import { createEffects } from './effects.js';
 import { eventLayout, overviewRange, createQualityMonitor } from './model.js';
 import { hallPage } from './paging.js';
 import { createMetropolis } from './metropolis.js';
+import { fitMetropolis } from './metropolis-fit.js';
 import { readDistrictPreference, saveDistrictPreference } from '../ui/district-preference.js';
 
 export function createScene(container, callbacks = {}) {
@@ -91,7 +92,7 @@ export function createScene(container, callbacks = {}) {
   function prepare(mode, owner, info = {}) {
     cancelIntro(true, false);
     if (info.view !== 'whole-session') targetHeightScale = 1;
-    if (mode !== 'city') {camera.near=.05;camera.clearViewOffset();camera.updateProjectionMatrix();}
+    if (mode !== 'city') {camera.fov=50;camera.near=.05;camera.clearViewOffset();camera.updateProjectionMatrix();}
     flight = null; keys.clear(); lastPointer = null;
     reader.stop(); interior.clear(); setHover(null);
     city.select(selected);
@@ -106,6 +107,7 @@ export function createScene(container, callbacks = {}) {
   let heightScale = 1, targetHeightScale = 1;
   let viewInsets = { left: 0, right: 0, top: 0, bottom: 0 };
   function frame(z0, z1, high = Math.max(12, ...layout.items.map(it => it.height)), x0=-15, x1=15, viewDirection=null, insets=viewInsets) {
+    camera.fov=50;camera.updateProjectionMatrix();
     // Fit every corner in the available container, using both FOV axes. The UI
     // supplies free space by sizing this container around its panels.
     const target = new THREE.Vector3((x0+x1)/2, high / 2, (z0 + z1) / 2);
@@ -135,7 +137,7 @@ export function createScene(container, callbacks = {}) {
     return frame(z0, z1, high * targetHeightScale);
   }
   function fly(view, info = {}, immediate = false) {
-    if(info.view!=='metropolis'){camera.near=.05;camera.updateProjectionMatrix();}
+    if(info.view!=='metropolis'){camera.near=.05;camera.fov=50;camera.updateProjectionMatrix();}
     framing = info.blockId != null ? { blockId: info.blockId } : info.view ?? null;
     const id = prepare('city', 'flight', info);
     flight = { id, p0: camera.position.clone(), t0: controls.target.clone(), ...view, elapsed: 0 };
@@ -210,15 +212,17 @@ export function createScene(container, callbacks = {}) {
     if(oldFraming==='metropolis')reframe(metropolisView());
   }
 
+  let metropolisRegion=null;
   function metropolisView() {
     targetHeightScale=1;
-    const b=metropolis.bounds(),z1=Math.max(layout.totalTokens*.01,b.z1);
+    const b=metropolis.bounds(layout),z1=Math.max(layout.totalTokens*.01,b.z1);
     city.setRange(0,z1);atmosphere.setRange(b.z0,z1);
-    // The long skyline uses the full horizontal band below the HUD. Reserving
-    // the header's width for the whole height turns the hero city into a line.
-    const insets={left:16,right:16,top:Math.max(viewInsets.top,width>760?220:140),bottom:viewInsets.bottom};
-    const azimuth=layout.totalTokens*.01<200?-.6:.03;
-    return frame(b.z0,z1,Math.max(b.high,30,...layout.items.map(it=>it.height)),b.x0,b.x1,new THREE.Vector3(-1,.7*Math.hypot(1,azimuth),-azimuth),insets);
+    const points=layout.items.flatMap(it=>[-3.5,3.5].flatMap(x=>[it.z0,it.z1].flatMap(z=>[0,it.height].map(y=>new THREE.Vector3(x,y,z)))));
+    points.push(...metropolis.points(true));
+    camera.clearViewOffset(); camera.fov=50; camera.updateProjectionMatrix();
+    metropolisRegion=labels.freeRegion(width,height);
+    if(!metropolisRegion)return {position:camera.position.clone(),target:controls.target.clone()};
+    return fitMetropolis(camera,points,{width,height},metropolisRegion);
   }
 
   function cancelIntro(cancelled = true, jump = true) {
@@ -329,12 +333,13 @@ export function createScene(container, callbacks = {}) {
     getMode: () => modes.get(),
     // Exposed only when the embedding development harness opts in.
     ...(callbacks.dev ? {
-      getStats: () => ({ memory: { ...renderer.info.memory }, render: { ...renderer.info.render }, quality, frameMs, cameraNear:camera.near,camera:camera.position.toArray(),target:controls.target.toArray(),viewport:{width,height,...viewInsets}, metropolis:metropolis.stats() }),
+      getStats: () => ({ memory: { ...renderer.info.memory }, render: { ...renderer.info.render }, quality, frameMs, cameraNear:camera.near,fov:camera.fov,camera:camera.position.toArray(),target:controls.target.toArray(),viewport:{width,height,...viewInsets}, metropolis:metropolis.stats() }),
       finishFrame:()=>renderer.getContext().finish(),
       projectAgent: id => {const v=metropolis.view(id);if(!v)return null;const p=v.target.project(camera);return {x:(p.x+1)*width/2,y:(1-p.y)*height/2};},
       projectMainCity:()=>layout.items.flatMap(it=>[-3.5,3.5].flatMap(x=>[it.z0,it.z1].flatMap(z=>[0,it.height].map(y=>{const p=new THREE.Vector3(x,y,z).project(camera);return{x:(p.x+1)*width/2,y:(1-p.y)*height/2};})))),
+      projectDistricts:()=>metropolis.points().map(v=>{const p=v.project(camera);return{x:(p.x+1)*width/2,y:(1-p.y)*height/2};}),
       projectBridges:()=>metropolis.bridgePoints().map(p=>{p.project(camera);return {x:(p.x+1)*width/2,y:(1-p.y)*height/2};}),
-      projectMetropolis:()=>{const b=metropolis.bounds(),points=[];for(const x of [b.x0,b.x1])for(const z of [b.z0,Math.max(b.z1,layout.totalTokens*.01)])for(const y of [0,Math.max(30,...layout.items.map(it=>it.height))]){const p=new THREE.Vector3(x,y,z).project(camera);points.push({x:(p.x+1)*width/2,y:(1-p.y)*height/2});}return points;},
+      projectMetropolis:()=>{const b=metropolis.bounds(layout),points=[];for(const x of [b.x0,b.x1])for(const z of [b.z0,Math.max(b.z1,layout.totalTokens*.01)])for(const y of [0,Math.max(30,...layout.items.map(it=>it.height))]){const p=new THREE.Vector3(x,y,z).project(camera);points.push({x:(p.x+1)*width/2,y:(1-p.y)*height/2});}return points;},
     } : {}),
     dispose() {
       if (dead) return; cancelIntro(true,false); dead = true; flight = null; reader.stop(); keys.clear(); modes.reset();
@@ -412,6 +417,7 @@ export function createScene(container, callbacks = {}) {
     const dt = Math.min(.1, elapsed); previous=now;frameMs=elapsed*1000;
     qualityMonitor.sample(elapsed);
     try {
+      if(framing==='metropolis' && metropolisRegion!==labels.freeRegion(width,height,false))reframe(metropolisView());
       const owner = modes.owner();
       if (owner === 'intro' && intro) {
         intro.elapsed+=dt;const t=reduced?1:Math.min(1,intro.elapsed/3.6);city.intro(t);

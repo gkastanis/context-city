@@ -14,7 +14,7 @@ The opening session is `sample/fresh-session.json`, explicitly marked Example
 session. Load transcript accepts `.jsonl` and `.json` Claude Code record files.
 Drop a file anywhere, or use the picker. Load example opens a keyboard accessible chooser for the invented Lantern settings
 page and the real session that built this page, redacted before publication.
-The third choice, **Session with subagents**, follows PDF export for the fictional Lantern project with five helper runs, four in the background and one foreground review. It includes parallel branches, a 20 minute pause, cache usage and a verbose test report that produces a large result finding. Its text and usage counts are invented. `npm run sample:agents` writes temporary transcript and metadata files, reads them through `createParser`, and links them with `agentRun` and `attachAgents` before writing the bundled Session. Loading it preserves the saved timeline axis and opens Overview; the Metropolis button frames the districts.
+The third choice, **Session with subagents**, follows PDF export for the fictional Lantern project with five helper runs, four in the background and one foreground review. It includes parallel branches, a 20 minute pause, cache usage and a verbose test report that produces a large result finding. Its text and usage counts are invented. `npm run sample:agents` writes temporary transcript and metadata files, reads them through `createParser`, and links them with `agentRun` and `attachAgents` before writing the bundled Session. Loading it preserves the saved timeline axis and opens Overview; the Metropolis button frames the main city, existing district buildings and their bridges at a diagonal 32.5° elevation and FOV 50. A numerical projection fit fills 80% of the largest rectangle clear of the measured open HUD panels, centres the projected box there, and refits when panels change. Pending plots and canal do not contribute to the fit; phones use the same rule.
 
 The opening choice remains the invented example. The real example has 224 requests,
 1,114 blocks, one compaction and MCP loads. Only 8 owner-approved prompts are
@@ -300,8 +300,15 @@ The panel shows up to 12 entries. Click or press Enter to jump to a request and 
 
 ## Metropolis
 
-When subagent runs are loaded, Metropolis beside Overview frames the main city,
-the canal and all subagent districts. Overview continues to frame the main city.
+Metropolis frames the main city and the districts that are running, merged or
+open at the current request. Pending foundations remain drawn but do not affect
+the fit. The canal can extend off screen. The lens stays at 50 degrees and the
+camera stays 32.5 degrees above the main city's ground centre, looking diagonally
+across the main city toward the districts. Only distance changes to fit the
+existing geometry. Before any run forks, the view fits the main city alone.
+Overview continues to frame the main city from its usual direction. Starting any
+example, file or folder load closes the phone Menu.
+
 Each district is a compact grid of its run's own blocks. Tower footprints are capped at 7 units. Extra token volume goes into height,
 split into tower groups at the skyline ceiling.
 The main road follows world Z; districts sit across the canal on positive X beyond the road strip.

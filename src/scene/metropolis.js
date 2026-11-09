@@ -1,7 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
 import { layoutRequest } from '../layout.js';
 import { agentBranches, agentColor, agentBranchLabel, runLabel } from '../ui/agents.js';
-import { districtLayout, districtGrid, runState, districtBridgeWidth, canalWidth } from './metropolis-model.js';
+import { districtLayout, districtGrid, runState, districtBridgeWidth, canalWidth, metropolisBounds } from './metropolis-model.js';
 import { facade } from './city.js';
 import { colorFor } from './theme.js';
 import { disposeTree } from './dispose.js';
@@ -183,7 +183,31 @@ export function createMetropolis() {
   return {group,load,sync,highlight,
     setVisible(v){enabled=v;group.visible=v;highlight(null);},
     labels:(metropolis=false)=>enabled?records.filter(r=>!metropolis||r.labelRank<6||r.agentId===hovered).map(r=>({label:`${runLabel(r.run)}: ${(r.run.description||'').slice(0,40)}`,layer:null,agent:true,agentId:r.agentId,x:r.y,color:r.color,metropolis,labelHeight:Math.max(10,...r.grid.cells.map(c=>c.height))+4,z0:r.x,z1:r.x,hovered:r.agentId===hovered})):[],
-    bounds(){return {x0:-15,x1:Math.max(15,...records.map(r=>r.y+r.depth/2)),high:Math.max(30,...records.flatMap(r=>r.grid.cells.map(c=>c.height))),z0:Math.min(0,...records.map(r=>r.x-r.width/2)),z1:Math.max(1,...records.map(r=>r.x+r.width/2))};},
+    bounds(layout){return metropolisBounds(layout,records);},
+    points(existingOnly=false){
+      const points=[];
+      const corners=(x0,x1,z0,z1,high)=>{for(const x of [x0,x1])for(const z of [z0,z1])for(const y of [0,high])points.push(new THREE.Vector3(x,y,z));};
+      for(const r of records){
+        if(existingOnly && r.state==='pending')continue;
+        if(!existingOnly)corners(r.y-r.depth/2,r.y+r.depth/2,r.x-r.width/2,r.x+r.width/2,.1);
+        for(const c of r.grid.cells){
+          const it=r.active?.get(c.blockId);if(!it)continue;
+          const max=r.maximum.get(c.blockId),factor=Math.sqrt(it.height*(it.z1-it.z0)/(max.height*(max.z1-max.z0)||1));
+          const x=r.y+c.y-r.depth/2,z=r.x+c.x-r.width/2,half=c.side*factor/2;
+          corners(x-half,x+half,z-half,z+half,c.height);
+        }
+      }
+      if(existingOnly && decks){
+        const m=new THREE.Matrix4();
+        decks.userData.segments.forEach((s,i)=>{
+          if(records[s.ri].state==='pending')return;
+          decks.getMatrixAt(i,m);
+          for(const x of [-.5,.5])for(const y of [-.5,.5])for(const z of [-.5,.5])
+            points.push(new THREE.Vector3(x,y,z).applyMatrix4(m));
+        });
+      }
+      return points;
+    },
     view(id){const r=records.find(r=>r.agentId===id);return r?{position:new THREE.Vector3(r.y-r.depth,Math.max(40,r.width,...r.grid.cells.map(c=>c.height))*1.1,r.x-r.width),target:new THREE.Vector3(r.y,Math.max(6,...r.grid.cells.map(c=>c.height))*.4,r.x)}:null;},
     bridgePoints(){if(!decks)return [];const m=new THREE.Matrix4();return decks.userData.segments.filter(s=>s.middle).map(s=>{const i=decks.userData.segments.indexOf(s);decks.getMatrixAt(i,m);return new THREE.Vector3().setFromMatrixPosition(m);});},
     pick(ray){
