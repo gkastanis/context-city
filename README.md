@@ -39,7 +39,7 @@ This record format is not documented and may change.
 
 Your file is parsed in your browser. Nothing is uploaded or stored; closing the tab forgets it. The page loads three.js from jsDelivr and fonts from Google Fonts. Transcript content is never sent to those services. Transcripts can include private text and secrets, so review what is visible before sharing screenshots.
 
-The page opens on **A real session with subagents**, a redacted Claude Code session that added keyboard shortcut help to this repository with four helper agents. It starts at the earliest request with the most agents running. The chooser also includes the invented Lantern settings example and the earlier redacted real session.
+The page opens on **A real session with subagents**, a redacted Claude Code session that added keyboard shortcut help to this repository with four helper agents. It starts at the earliest request with the most agents running. The chooser also includes the earlier redacted real session that built this page.
 
 To publish your own session safely, run `scripts/redact.mjs` locally with a reviewed configuration. It removes text by default and produces a local report for owner review. Follow [docs/REDACT.md](docs/REDACT.md) for the command, tool aliases, optional prompt approvals and surviving-string review. Keep the original transcript, private config and report out of your published files.
 

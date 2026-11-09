@@ -139,7 +139,6 @@ const exampleChooser = el('dialog', { id: 'example-chooser', 'aria-labelledby': 
   el('div', { class: 'help-heading' }, el('h2', { id: 'example-title' }, 'Choose an example'), button('Close', () => exampleChooser.close())),
   ...[
     ['A real session with subagents', 'A Claude Code session that built a feature on this repo with four helper agents. Shows the branch graph and the Metropolis view.'],
-    ['Invented example: Lantern settings page', 'A short invented session with readable text and illustrative token counts.'],
     ['A real session, redacted: the session that built this page', '224 requests, one compaction and real tool loads, with 8 approved prompts.'],
   ].map(([label, line], i) => el('section', {}, button(label, () => { exampleChooser.close(); loadExample(i); }, { id: `example-${i}` }), el('p', { class: 'muted' }, line))));
 const mode = el('span', { id: 'mode-label' }, 'City');
@@ -400,7 +399,7 @@ async function loadExample(which = 0) {
     let value;
     if (exampleData != null) value = expandSession(JSON.parse(exampleData[which]), 8);
     else {
-      const response = await fetch(new URL(['../sample/real-agents-session.json', '../sample/fresh-session.json', '../sample/real-session-redacted.json'][which], import.meta.url));
+      const response = await fetch(new URL(['../sample/real-agents-session.json', '../sample/real-session-redacted.json'][which], import.meta.url));
       if (!response.ok) throw new Error(`Example load failed (${response.status})`);
       value = await response.json();
     }

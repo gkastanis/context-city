@@ -83,7 +83,7 @@ test('all three compact embedded examples preserve every request and approved te
   assert.equal(script(pages.output), script(artifact.output));
   assert.equal(pages.output.match(/<style>([\s\S]*?)<\/style>/)[1], artifact.output.match(/<style>([\s\S]*?)<\/style>/)[1]);
   const embedded = JSON.parse(artifact.output.match(/const exampleData = (.*); \/\* SAMPLE_DATA \*\//)[1]);
-  for (const [i, filename] of ['real-agents-session.json', 'fresh-session.json', 'real-session-redacted.json'].entries()) {
+  for (const [i, filename] of ['real-agents-session.json', 'real-session-redacted.json'].entries()) {
     const original = JSON.parse(await readFile(new URL('../sample/' + filename, import.meta.url), 'utf8'));
     const wire = JSON.parse(embedded[i]);
     assert.ok(wire.requests.every(r => !Object.hasOwn(r, 'blockIds') && !Object.hasOwn(r, 'newBlockIds')));
@@ -96,7 +96,7 @@ test('all three compact embedded examples preserve every request and approved te
       assert.equal(original.agents.length, 4);
       assert.match(artifact.output, /A real session with subagents/);
     }
-    if (i === 2) {
+    if (i === 1) {
       assert.equal(original.requests.length, 224);
       assert.equal(Object.keys(original.blocks).length, 1114);
       assert.equal(original.events.filter(e => e.type === 'compaction').length, 1);

@@ -123,7 +123,7 @@ export async function build({ sample = null, pages = false } = {}) {
   const worker = (await bundle('src/worker.js')).replace(/await __load\("src\/worker.js"\);$/, () => '__load("src/worker.js");');
   if (/await import\(/.test(worker)) throw new Error('Worker must have no external imports');
   sample ??= await read('sample/real-agents-session.json');
-  const rawExamples = [sample, await read('sample/fresh-session.json'), await read('sample/real-session-redacted.json')];
+  const rawExamples = [sample, await read('sample/real-session-redacted.json')];
   const examples = rawExamples.map(raw => {
     const value = JSON.parse(raw);
     const wire = value.blocks && value.requests ? compactSession(value) : value;

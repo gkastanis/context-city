@@ -10,11 +10,10 @@ The generated file is an page fragment beginning with its title, viewport-fit
 metadata and CSS. The host supplies document wrappers. For a local browser preview,
 the fragment also loads directly at `/dist/index.html`.
 
-The opening session is `sample/fresh-session.json`, explicitly marked Example
+The opening session is `sample/real-agents-session.json`, explicitly marked Example
 session. Load transcript accepts `.jsonl` and `.json` Claude Code record files.
-Drop a file anywhere, or use the picker. Load example opens a keyboard accessible chooser for the invented Lantern settings
-page and the real session that built this page, redacted before publication.
-The first choice, **A real session with subagents**, is the default: a recorded session that built a feature on this repository with four helper agents. It demonstrates the branch graph and Metropolis view. The other choices are the invented Lantern settings session and the earlier redacted real session.
+Drop a file anywhere, or use the picker. Load example opens a keyboard accessible chooser with two real sessions, both redacted before publication.
+The first choice, **A real session with subagents**, is the default: a recorded session that built a feature on this repository with four helper agents. It demonstrates the branch graph and Metropolis view. The second choice is the earlier redacted session that built this page. `sample/fresh-session.json` is now a test fixture only.
 
 The earlier real session is the third choice. It has 224 requests,
 1,114 blocks, one compaction and MCP loads. Only 8 owner-approved prompts are
