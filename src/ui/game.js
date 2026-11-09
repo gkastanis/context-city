@@ -24,7 +24,8 @@ export function createGame({ call, jump, locate, showFindings = () => {}, summar
     progress.textContent = `${found.size} of ${facts.quests.length} found`;
     circle.style.strokeDasharray = `${facts.quests.length ? found.size / facts.quests.length * 100 : 0} 100`;
     list.replaceChildren(...facts.quests.map(q => button(q.label, () => {
-      if (q.blockId) locate(q.blockId);
+      if(q.action==='district'){call('showMetropolis');discover(q);}
+      else if (q.blockId) locate(q.blockId);
       else if (q.event) {
         jump(q.event.requestIdx, true);
         if (q.action === 'loaded') {
@@ -167,6 +168,7 @@ export function createGame({ call, jump, locate, showFindings = () => {}, summar
     }, 250);
   }
   return { guide, guess, intro, toast, summaryDialog, play, pause, stop, rate, summary, update, startIntro, skipIntro, pausePlayback, mode,
+    findDistrict() {discover(facts?.quests.find(q=>q.id==='subagent'));},
     toggleGuess() { clearTimeout(guessTimer); guess.hidden = !guess.hidden; },
     select: id => checkBlock(id, false), enter: id => checkBlock(id, true),
     setSession(value, navigating = false) {

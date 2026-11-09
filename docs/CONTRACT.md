@@ -168,6 +168,17 @@ use the minimum and maximum times of the run's own requests. Unlinked runs remai
 in the list. Request and time lane packing use inclusive endpoints independently.
 Only IDs and timing scalars are added; notification text keeps its existing block.
 
+## Metropolis branch measurements
+
+`agentBranches(session)` also returns `forkBlockId` (the first Agent or Task
+tool_use block ID, null when unavailable), `mergeBlockId` (the completion
+notification for async runs, the tool_result for foreground runs, null for open
+runs), and `returnedTokens` (that completion block's estTokens, zero when absent).
+`delegation` is peak run input tokens divided by returnedTokens, or null when
+there is no positive return measurement. Peak uses measuredTokens when available,
+otherwise estTokens. These are pure derived fields; the Session wire shape is
+unchanged. An async launch acknowledgement never counts as returned context.
+
 ## Privacy
 
 The page parses dropped files in the browser. No network calls with transcript

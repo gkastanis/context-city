@@ -1,5 +1,19 @@
 # Scene API (T2)
 
+## Subagent metropolis (T14)
+
+`setSession` builds districts only when the Session has agents. `setRequest`
+synchronizes their pending, running, merged or open state. `showMetropolis()`
+frames the main city and districts; `overview()` retains its main-city framing.
+`setDistrictsVisible(boolean)` controls districts, canal and bridges together and
+saves only that boolean display preference. `openAgentDistrict(agentId)` flies
+toward a district, then emits `onAgentOpen(agentId)` for the host to switch runs.
+Cancelling the flight cancels that callback. Reduced motion completes immediately.
+`onAgentHover(agentId)` lets the host record discovery without receiving text.
+District and bridge tooltip text is rendered with textContent by the scene.
+Development-only stats include district and bridge counts, sync states, resolved
+rectangles and pulse counts; projection helpers support browser hit tests.
+
 Import `createScene` from `src/scene/index.js`. It imports three.js and
 OrbitControls directly from jsDelivr (0.160.0); no import map is needed.
 Serve the repository root over HTTP, for example `python3 -m http.server`,

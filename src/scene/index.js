@@ -12,6 +12,8 @@ import { createAtmosphere } from './atmosphere.js';
 import { createEffects } from './effects.js';
 import { eventLayout, overviewRange, createQualityMonitor } from './model.js';
 import { hallPage } from './paging.js';
+import { createMetropolis } from './metropolis.js';
+import { readDistrictPreference, saveDistrictPreference } from '../ui/district-preference.js';
 
 export function createScene(container, callbacks = {}) {
   const emit = (name, ...args) => {
@@ -20,11 +22,11 @@ export function createScene(container, callbacks = {}) {
       if (name !== 'onError') { try { callbacks.onError?.(err); } catch { /* Error handlers cannot interrupt scene state. */ } }
     }
   };
-  let renderer;
+  let renderer, lowPowerContext=false;
   // Try lighter settings before giving up: some drivers refuse antialiasing or the default GPU choice.
   const attempts = [{ antialias: true }, { antialias: false }, { antialias: false, powerPreference: 'low-power', depth: true, stencil: false }];
   let lastError = null;
-  for (const options of attempts) { try { renderer = new THREE.WebGLRenderer(options); break; } catch (err) { lastError = err; } }
+  for (const options of attempts) { try { renderer = new THREE.WebGLRenderer(options); lowPowerContext=options.powerPreference==='low-power'; break; } catch (err) { lastError = err; } }
   if (!renderer) {
     const probe = document.createElement('canvas');
     const anyWebGL = !!(probe.getContext('webgl2') || probe.getContext('webgl'));
@@ -48,6 +50,11 @@ export function createScene(container, callbacks = {}) {
   const atmosphere = createAtmosphere(scene, renderer, camera);
   const effects = createEffects(); scene.add(effects.group);
   const city = createCity(); scene.add(city.group);
+  const metropolis = createMetropolis(); scene.add(metropolis.group);
+  const districtTip = document.createElement('div'); districtTip.className='metropolis-tooltip'; districtTip.hidden=true; districtTip.setAttribute('role','tooltip'); container.append(districtTip);
+  let districtsVisible=readDistrictPreference();
+  let agentHover=null;
+  metropolis.setVisible(districtsVisible);
   const head = new THREE.Mesh(new THREE.PlaneGeometry(11, 26),
     new THREE.MeshBasicMaterial({ color: '#ffd38a', transparent: true, opacity: .12, side: THREE.DoubleSide, blending: THREE.AdditiveBlending, depthWrite: false }));
   head.position.y = 13;
@@ -79,11 +86,12 @@ export function createScene(container, callbacks = {}) {
   const listeners = [];
   function listen(target, name, fn, options) { target.addEventListener(name, fn, options); listeners.push(() => target.removeEventListener(name, fn, options)); }
   function setHover(id) { if (id !== hover) { hover = id; emit('onHover', id); } }
+  function setAgentHover(id) {if(id===agentHover)return;agentHover=id;metropolis.highlight(id);updateLabels();if(id)emit('onAgentHover',id);}
   function setSelected(id) { selected = id; city.select(id); emit('onSelect', id); }
   function prepare(mode, owner, info = {}) {
     cancelIntro(true, false);
     if (info.view !== 'whole-session') targetHeightScale = 1;
-    if (mode !== 'city') camera.clearViewOffset();
+    if (mode !== 'city') {camera.near=.05;camera.clearViewOffset();camera.updateProjectionMatrix();}
     flight = null; keys.clear(); lastPointer = null;
     reader.stop(); interior.clear(); setHover(null);
     city.select(selected);
@@ -97,26 +105,27 @@ export function createScene(container, callbacks = {}) {
   }
   let heightScale = 1, targetHeightScale = 1;
   let viewInsets = { left: 0, right: 0, top: 0, bottom: 0 };
-  function frame(z0, z1, high = Math.max(12, ...layout.items.map(it => it.height))) {
+  function frame(z0, z1, high = Math.max(12, ...layout.items.map(it => it.height)), x0=-15, x1=15, viewDirection=null, insets=viewInsets) {
     // Fit every corner in the available container, using both FOV axes. The UI
     // supplies free space by sizing this container around its panels.
-    const target = new THREE.Vector3(0, high / 2, (z0 + z1) / 2);
-    const direction = (targetHeightScale > 1 ? new THREE.Vector3(-1, 1.1, -.32) : new THREE.Vector3(-1, .4, -.7)).normalize();
+    const target = new THREE.Vector3((x0+x1)/2, high / 2, (z0 + z1) / 2);
+    const direction = (viewDirection??(targetHeightScale > 1 ? new THREE.Vector3(-1, 1.1, -.32) : new THREE.Vector3(-1, .4, -.7))).normalize();
     const forward = direction.clone().negate();
     const right = new THREE.Vector3().crossVectors(forward, camera.up).normalize();
     const up = new THREE.Vector3().crossVectors(right, forward).normalize();
-    const freeW = Math.max(width * .22, width - viewInsets.left - viewInsets.right);
-    const freeH = Math.max(height * .22, height - viewInsets.top - viewInsets.bottom);
+    const freeW = Math.max(width * .22, width - insets.left - insets.right);
+    const freeH = Math.max(height * .22, height - insets.top - insets.bottom);
     const tangent = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
     const tanY = tangent * freeH / height * .9;
     const tanX = tangent * camera.aspect * freeW / width * .9;
     let distance = 25;
-    for (const x of [-15, 15]) for (const y of [0, high]) for (const z of [z0, z1]) {
+    for (const x of [x0, x1]) for (const y of [0, high]) for (const z of [z0, z1]) {
       const v = new THREE.Vector3(x, y, z).sub(target), toward = v.dot(direction);
       distance = Math.max(distance, toward + Math.abs(v.dot(right)) / tanX, toward + Math.abs(v.dot(up)) / tanY);
     }
     // Off-axis projection centers the free HUD rectangle without perspective drift.
-    camera.setViewOffset(width, height, -(viewInsets.left-viewInsets.right)/2, -(viewInsets.top-viewInsets.bottom)/2, width, height);
+    // Near depth follows the actual camera throughout a flight and orbit.
+    camera.setViewOffset(width, height, -(insets.left-insets.right)/2, -(insets.top-insets.bottom)/2, width, height);
     return { position: target.clone().addScaledVector(direction, distance), target };
   }
   function overviewView(whole = false, exaggerate = whole) {
@@ -126,6 +135,7 @@ export function createScene(container, callbacks = {}) {
     return frame(z0, z1, high * targetHeightScale);
   }
   function fly(view, info = {}, immediate = false) {
+    if(info.view!=='metropolis'){camera.near=.05;camera.updateProjectionMatrix();}
     framing = info.blockId != null ? { blockId: info.blockId } : info.view ?? null;
     const id = prepare('city', 'flight', info);
     flight = { id, p0: camera.position.clone(), t0: controls.target.clone(), ...view, elapsed: 0 };
@@ -141,7 +151,9 @@ export function createScene(container, callbacks = {}) {
   function finishFlight() {
     if (!flight || !modes.valid(flight.id)) return;
     camera.position.copy(flight.position); controls.target.copy(flight.target); camera.lookAt(controls.target);
+    const onDone=flight.onDone;
     flight = null; modes.request('city', 'orbit'); controls.enabled = true;
+    onDone?.();
   }
   function currentItem(id) {
     const item = layout.items.find(it => it.blockId === id);
@@ -157,14 +169,15 @@ export function createScene(container, callbacks = {}) {
       return visible;
     }) ?? [];
     const gates = windowGroup ? [...visibleGates, ...windowGroup.userData.ticks] : [];
-    labels.set({ ...layout, newestBlockId: session?.requests[currentRequest]?.newBlockIds.at(-1), districts: [...layout.districts, ...gates] }, session);
+    labels.set({ ...layout, newestBlockId: session?.requests[currentRequest]?.newBlockIds.at(-1), districts: [...layout.districts, ...gates, ...metropolis.labels(framing==='metropolis')] }, session);
   }
-  function changeRequest(idx, initial) {
+  function changeRequest(idx, initial, restore = false) {
     const next = layoutRequest(session, idx);
     cancelIntro(true);
     const mode = modes.get(), reading = reader.getState(), keep = next.items.some(it => it.blockId === selected);
     const oldFraming = framing;
     layout = next; currentRequest = idx;
+    metropolis.sync(idx,reduced,layout,initial || restore);
     city.update(layout, hidden, !initial && !reduced); updateLabels();
     if (selected != null && !keep) setSelected(null); else city.select(selected);
     if (!initial && mode === 'reading') {
@@ -194,6 +207,18 @@ export function createScene(container, callbacks = {}) {
       if (initial) fly(view, { view: 'overview' }, true);
       else reframe(view);
     }
+    if(oldFraming==='metropolis')reframe(metropolisView());
+  }
+
+  function metropolisView() {
+    targetHeightScale=1;
+    const b=metropolis.bounds(),z1=Math.max(layout.totalTokens*.01,b.z1);
+    city.setRange(0,z1);atmosphere.setRange(b.z0,z1);
+    // The long skyline uses the full horizontal band below the HUD. Reserving
+    // the header's width for the whole height turns the hero city into a line.
+    const insets={left:16,right:16,top:Math.max(viewInsets.top,width>760?220:140),bottom:viewInsets.bottom};
+    const azimuth=layout.totalTokens*.01<200?-.6:.03;
+    return frame(b.z0,z1,Math.max(b.high,30,...layout.items.map(it=>it.height)),b.x0,b.x1,new THREE.Vector3(-1,.7*Math.hypot(1,azimuth),-azimuth),insets);
   }
 
   function cancelIntro(cancelled = true, jump = true) {
@@ -251,10 +276,11 @@ export function createScene(container, callbacks = {}) {
       framing = null; fullWindow = false; prepare('city', 'orbit'); modes.reset(); setSelected(null); city.clear();
       if (windowGroup) disposeTree(windowGroup);
       session = value; effects.clear(); atmosphere.setFill(0, true); hidden.clear(); windowGroup = createWindow(session.meta); scene.add(windowGroup);
+      metropolis.load(value); metropolis.setVisible(districtsVisible); districtTip.hidden=true;agentHover=null;
       if (value.requests.length) changeRequest(0, true);
       else { layout = { items: [], districts: [], totalTokens: 0, measured: false }; city.update(layout, hidden, false); updateLabels(); fly(frame(0, 1), {}, true); }
     },
-    setRequest(idx) { if (!session) throw new Error('Set a session first'); changeRequest(idx, false); },
+    setRequest(idx, { restore = false } = {}) { if (!session) throw new Error('Set a session first'); changeRequest(idx, false, restore); },
     select(id) {
       if (id != null) currentItem(id);
       cancelIntro(true);
@@ -268,6 +294,15 @@ export function createScene(container, callbacks = {}) {
     flyToBlock(id) { targetHeightScale = 1; city.setRange(0,layout.totalTokens*.01); const it = currentItem(id); setSelected(id); fullWindow = false; updateLabels(); fly(frame(it.z0, it.z1, it.height + 4), { blockId: id }); },
     flyToDistrict(i) { targetHeightScale = 1; city.setRange(0,layout.totalTokens*.01); const d = district(i); setSelected(null); fullWindow = false; updateLabels(); fly(frame(d.z0, d.z1), { district: i }); },
     overview() { fullWindow = false; fly(overviewView(), { view: 'overview' }); if (session) updateLabels(); },
+    showMetropolis() { fullWindow=false;fly(metropolisView(),{view:'metropolis'});updateLabels(); },
+    openAgentDistrict(id) {
+      const view=metropolis.view(id);if(!view)return;
+      fly(view,{view:'agent-district'});
+      // The existing flight owns navigation; cancelled flights cannot open a run.
+      if(flight)flight.onDone=()=>emit('onAgentOpen',id);
+      else emit('onAgentOpen',id);
+    },
+    setDistrictsVisible(value) { districtsVisible=!!value;metropolis.setVisible(districtsVisible);districtTip.hidden=true;updateLabels();saveDistrictPreference(districtsVisible); },
     showWholeSession() { fullWindow = false; fly(overviewView(true), { view: 'whole-session' }); updateLabels(); },
     showFullWindow() { if (!session) return; targetHeightScale = 1; city.setRange(0,session.meta.window*.01); atmosphere.setRange(0,session.meta.window*.01); fullWindow = true; updateLabels(); fly(frame(0, session.meta.window * 0.01, Math.max(36, session.meta.window * 0.0002 + 100)), { view: 'full-window' }); },
     enterBlock(id) {
@@ -293,11 +328,18 @@ export function createScene(container, callbacks = {}) {
     setLayerVisible(layer, visible) { if (visible) hidden.delete(layer); else hidden.add(layer); city.setHidden(hidden); setHover(null); },
     getMode: () => modes.get(),
     // Exposed only when the embedding development harness opts in.
-    ...(callbacks.dev ? { getStats: () => ({ memory: { ...renderer.info.memory }, render: { ...renderer.info.render }, quality, frameMs }) } : {}),
+    ...(callbacks.dev ? {
+      getStats: () => ({ memory: { ...renderer.info.memory }, render: { ...renderer.info.render }, quality, frameMs, cameraNear:camera.near,camera:camera.position.toArray(),target:controls.target.toArray(),viewport:{width,height,...viewInsets}, metropolis:metropolis.stats() }),
+      finishFrame:()=>renderer.getContext().finish(),
+      projectAgent: id => {const v=metropolis.view(id);if(!v)return null;const p=v.target.project(camera);return {x:(p.x+1)*width/2,y:(1-p.y)*height/2};},
+      projectMainCity:()=>layout.items.flatMap(it=>[-3.5,3.5].flatMap(x=>[it.z0,it.z1].flatMap(z=>[0,it.height].map(y=>{const p=new THREE.Vector3(x,y,z).project(camera);return{x:(p.x+1)*width/2,y:(1-p.y)*height/2};})))),
+      projectBridges:()=>metropolis.bridgePoints().map(p=>{p.project(camera);return {x:(p.x+1)*width/2,y:(1-p.y)*height/2};}),
+      projectMetropolis:()=>{const b=metropolis.bounds(),points=[];for(const x of [b.x0,b.x1])for(const z of [b.z0,Math.max(b.z1,layout.totalTokens*.01)])for(const y of [0,Math.max(30,...layout.items.map(it=>it.height))]){const p=new THREE.Vector3(x,y,z).project(camera);points.push({x:(p.x+1)*width/2,y:(1-p.y)*height/2});}return points;},
+    } : {}),
     dispose() {
       if (dead) return; cancelIntro(true,false); dead = true; flight = null; reader.stop(); keys.clear(); modes.reset();
       renderer.setAnimationLoop(null); observer.disconnect(); listeners.forEach(remove => remove());
-      atmosphere.dispose(); controls.dispose(); interior.dispose(); city.dispose(); labels.dispose();
+      atmosphere.dispose(); controls.dispose(); interior.dispose(); city.dispose(); labels.dispose(); metropolis.dispose();districtTip.remove();
       if (windowGroup) disposeTree(windowGroup);
       disposeTree(scene); renderer.dispose(); renderer.forceContextLoss(); canvas.remove(); container.style.position = originalPosition;
     },
@@ -306,7 +348,7 @@ export function createScene(container, callbacks = {}) {
     const rect = canvas.getBoundingClientRect();
     pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1);
     ray.setFromCamera(pointer, camera);
-    if (modes.get() !== 'inside') return city.pick(ray);
+    if (modes.get() !== 'inside') return city.pick(ray) ?? metropolis.pick(ray);
     const objects = interior.group.children;
     // The nearest surface stops the ray, so a sign cannot be clicked through the plaque or a sheet.
     const hit = ray.intersectObjects(objects, true)[0];
@@ -324,18 +366,23 @@ export function createScene(container, callbacks = {}) {
     if (modes.get() === 'inside' && down && lastPointer) {
       interior.look(e.clientX - lastPointer[0], e.clientY - lastPointer[1]); lastPointer = [e.clientX, e.clientY]; return;
     }
-    setHover(modes.get() === 'city' ? pick(e)?.userData.blockId ?? null : null);
+    const data=modes.get()==='city'?pick(e)?.userData:null;
+    setHover(data?.blockId??null);
+    setAgentHover(data?.agentId??null);
+    districtTip.hidden=!data?.tooltip;
+    if(data?.tooltip){districtTip.textContent=data.tooltip;districtTip.style.left=`${Math.max(8,Math.min(width-320,e.clientX-canvas.getBoundingClientRect().left+14))}px`;districtTip.style.top=`${Math.max(8,Math.min(height-110,e.clientY-canvas.getBoundingClientRect().top+14))}px`;}
   });
   listen(canvas, 'pointerup', e => {
     const click = down && Math.hypot(e.clientX - down[0], e.clientY - down[1]) < 5; down = null; lastPointer = null;
     if (!click) return;
     const object = pick(e);
-    if (object?.userData.action) object.userData.action();
+    if (object?.userData.agentId) api.openAgentDistrict(object.userData.agentId);
+    else if (object?.userData.action) object.userData.action();
     else if (object?.userData.blockId) api.select(object.userData.blockId);
     else if (modes.get() === 'city') emit('onBackgroundClick');
   });
   listen(canvas, 'pointercancel', () => { down = null; lastPointer = null; });
-  listen(canvas, 'pointerleave', () => setHover(null));
+  listen(canvas, 'pointerleave', () => {setHover(null);setAgentHover(null);districtTip.hidden=true;});
   listen(canvas, 'dblclick', e => { if (modes.get() === 'city') { const id = pick(e)?.userData.blockId; if (id) api.enterBlock(id); } });
   listen(canvas, 'wheel', e => { if (modes.get() === 'city') framing = null; if (modes.get() === 'inside') { e.preventDefault(); interior.move(Math.max(-2, Math.min(2, e.deltaY * 0.01)), 0); } }, { passive: false });
   listen(canvas, 'keydown', e => {
@@ -350,8 +397,8 @@ export function createScene(container, callbacks = {}) {
   function resize() {
     width = Math.max(1, container.clientWidth); height = Math.max(1, container.clientHeight);
     camera.aspect = width / height; camera.updateProjectionMatrix(); renderer.setSize(width, height, false); atmosphere.resize(width,height);
-    if (modes.get() === 'city' && session && (framing === 'overview' || framing === 'full-window' || framing === 'whole-session')) {
-      const view = fullWindow ? frame(0, session.meta.window * 0.01, Math.max(36, session.meta.window * 0.0002 + 100)) : overviewView(framing === 'whole-session');
+    if (modes.get() === 'city' && session && (framing === 'overview' || framing === 'full-window' || framing === 'whole-session' || framing==='metropolis')) {
+      const view = framing==='metropolis'?metropolisView():fullWindow ? frame(0, session.meta.window * 0.01, Math.max(36, session.meta.window * 0.0002 + 100)) : overviewView(framing === 'whole-session');
       if (flight) { flight.position.copy(view.position); flight.target.copy(view.target); }
       else { camera.position.copy(view.position); controls.target.copy(view.target); camera.lookAt(view.target); }
     }
@@ -393,9 +440,12 @@ export function createScene(container, callbacks = {}) {
       heightScale = reduced ? targetHeightScale : THREE.MathUtils.damp(heightScale, targetHeightScale, 6, dt);
       city.group.scale.y = heightScale;
       city.tick(dt, reduced); effects.tick(dt,reduced); effects.group.visible=modes.get()!=='inside';
+      metropolis.tick(dt,reduced,lowPowerContext||quality==='low'||width<=760,modes.get()!=='inside',camera,height);
       trail.visible=head.visible&&!reduced&&owner==='reader';
       const air=atmosphere.tick(dt,reduced,modes.get()==='inside');
       for(const u of windowGroup?.userData.walls??[]){u.time.value=air.time;u.alarm.value=air.fill>.85?1:0;}
+      const near = modes.get()==='city' && session?.agents?.length ? Math.max(.05,camera.position.distanceTo(controls.target)/2000) : .05;
+      if(camera.near!==near){camera.near=near;camera.updateProjectionMatrix();}
       camera.updateMatrixWorld();
       labels.update(camera, width, height, hidden, modes.get() !== 'inside', heightScale, viewInsets.top);
       atmosphere.render();

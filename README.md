@@ -1,5 +1,7 @@
 # Context City
 
+Metropolis shows loaded subagent runs as compact districts across a canal, with bridges tracing delegated work and the tokens returned to the main context.
+
 Context City turns a Claude Code session into a city you can explore. Buildings represent pieces of the model's context, in the order it receives them. Move through requests to see context grow, tools load and compaction shorten the history. Select a building to read its text, walk the sequence, or follow the Field guide.
 
 ## Use it

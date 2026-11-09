@@ -37,11 +37,16 @@ export function agentBranches(session) {
     const fork = calls.get(run.toolUseId)?.idx ?? result?.idx ?? merge;
     const times = run.session.requests.map(r => r.time).filter(Number.isFinite);
     const cache = sessionCache(run.session.requests);
+    const forkBlockId = calls.get(run.toolUseId)?.block.id ?? null;
+    const mergeBlockId = completion?.block.id ?? null;
+    const returnedTokens = completion?.block.estTokens ?? 0;
+    const peak = run.session.requests.reduce((n, r) => Math.max(n, r.measuredTokens ?? r.estTokens ?? 0), 0);
     branches.push({ agentId: run.agentId, label: runLabel(run), description: run.description, async,
+      forkBlockId, mergeBlockId, returnedTokens, delegation: returnedTokens > 0 ? peak / returnedTokens : null,
       fork, merge, forkTime: session.requests[fork]?.time ?? null, mergeTime: session.requests[merge]?.time ?? null,
       runStart: times.length ? times.reduce((a, b) => Math.min(a, b)) : null, runEnd: times.length ? times.reduce((a, b) => Math.max(a, b)) : null,
       open: !completion, requests: run.session.requests.length,
-      peak: run.session.requests.reduce((n, r) => Math.max(n, r.measuredTokens ?? r.estTokens ?? 0), 0),
+      peak,
       inputTokens: cache?.total ?? null, hitRate: cache?.hitRate ?? null });
   }
   branches.sort((a, b) => a.fork - b.fork || a.merge - b.merge);

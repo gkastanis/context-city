@@ -8,20 +8,23 @@ function toolSeed(id) {
   for (let i=0;i<id.length;i++) value=(value*31+id.charCodeAt(i))>>>0;
   return value/4294967295;
 }
-function facade(layer, glass = false) {
+export function facade(layer, glass = false, district = false) {
   return new THREE.ShaderMaterial({ fog: true, uniforms: { ...THREE.UniformsUtils.clone(THREE.UniformsLib.fog), recentStart: {value:0}, recentSpan:{value:1}, tint: { value: new THREE.Color(colorFor(layer)) }, time: { value: 0 } },
     transparent: glass, depthWrite: !glass, extensions: { derivatives: true },
-    vertexShader: `varying vec3 local, dimensions, normalV; varying float fresh, seed, roadZ;
+    vertexShader: `${district ? 'attribute float light, tool, glassStart; varying vec3 districtTint; varying float districtLight, districtTool, districtGlass;' : ''}
+varying vec3 local, dimensions, normalV; varying float fresh, seed, roadZ;
 #include <fog_pars_vertex>
       void main(){local=position;normalV=normal;dimensions=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));
       seed=instanceMatrix[3].z*.17;fresh=1.;
 #ifdef USE_INSTANCING_COLOR
 fresh=instanceColor.r;seed=instanceColor.g*100.;
 #endif
+      ${district ? 'districtTint=instanceColor;districtLight=light;districtTool=tool;districtGlass=glassStart;fresh=.35;seed=instanceMatrix[3].z*.17+instanceMatrix[3].x*.31;' : ''}
       roadZ=instanceMatrix[3].z;vec4 mvPosition=modelViewMatrix*instanceMatrix*vec4(position,1.);gl_Position=projectionMatrix*mvPosition;
 #include <fog_vertex>
 }`,
-    fragmentShader: `uniform vec3 tint;uniform float time,recentStart,recentSpan;varying vec3 local,dimensions,normalV;varying float fresh, seed, roadZ;
+    fragmentShader: `${district ? 'varying vec3 districtTint; varying float districtLight, districtTool, districtGlass;' : ''}
+uniform vec3 tint;uniform float time,recentStart,recentSpan;varying vec3 local,dimensions,normalV;varying float fresh, seed, roadZ;
 #include <fog_pars_fragment>
       float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
       void main(){vec2 uv=vec2(abs(normalV.x)>.5?local.z*dimensions.z:local.x*dimensions.x,local.y*dimensions.y);
@@ -34,17 +37,19 @@ fresh=instanceColor.r;seed=instanceColor.g*100.;
         win*=1.-step(.5,abs(normalV.y));
         vec3 edge=step(vec3(.485),abs(local));float outline=step(1.5,edge.x+edge.y+edge.z);
         float flicker=.94+.06*sin(time*.7+hash(cell+seed)*40.);
-        vec3 tone=tint;
+        vec3 tone=${district ? 'districtTint' : 'tint'};
+        ${district ? 'if(districtTool>.5){tone=mix(tone,vec3(.12,.32,.9),.36*hash(vec2(seed,1.)));tone*=.82+.35*hash(vec2(seed,2.));}tone=mix(vec3(dot(tone,vec3(.21,.72,.07))),tone,.88)*districtLight;' : ''}
         ${layer === 'tools' ? 'tone=mix(tint,vec3(.12,.32,.9),.36*hash(vec2(seed,1.)));tone*=.82+.35*hash(vec2(seed,2.));' : ''}
         vec3 c=tone*(.09+win*(1.05+fresh*.35)*flicker+outline*.9);
         if(abs(normalV.y)>.5)c=tone*(.1+outline*1.0);
+        ${district ? 'if(districtTool>.5&&local.y>districtGlass)c=tone*(.025+win*1.2+outline*1.6);' : ''}
         ${glass ? 'c=tone*(.025+win*1.2+outline*1.6);' : ''}
         gl_FragColor=vec4(c,${glass ? '.72' : '1.'});
 #include <tonemapping_fragment>
 #include <colorspace_fragment>
 float fogFactor=1.-exp(-fogDensity*fogDensity*vFogDepth*vFogDepth);
  // Retain facade structure in the distance instead of filling it with fog.
- float age=1.-smoothstep(recentStart-recentSpan*.65,recentStart,roadZ);
+ float age=${district ? '0.' : '1.-smoothstep(recentStart-recentSpan*.65,recentStart,roadZ)'};
  float haze=clamp(fogFactor,0.,.68);
  vec3 sky=fogColor*.24;
  vec3 faded=mix(gl_FragColor.rgb,vec3(dot(gl_FragColor.rgb,vec3(.21,.72,.07)))*.4+sky,.72*age);

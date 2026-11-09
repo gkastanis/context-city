@@ -587,3 +587,5 @@ button.primary:hover { color: var(--accent); }
 @media (max-width: 760px) {
   #phone-menu .menu-heading { display: flex; }
 }
+.metropolis-tooltip { position:absolute; z-index:8; pointer-events:none; width:min(310px,calc(100% - 16px)); padding:12px 14px; border:1px solid #4fc3d966; border-radius:6px; background:#0c1425f5; box-shadow:0 8px 32px #0008; color:#e6e9f3; font:13px/1.5 'IBM Plex Sans',sans-serif; }
+.layer-check[hidden] { display:none; }

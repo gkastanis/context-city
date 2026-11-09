@@ -30,7 +30,7 @@ export function createLabels(container) {
       padding: '3px 6px', borderRadius: '3px', display: 'none' });
     root.append(el); return el;
   });
-  let ranked = [], buildings = [], districts = [], gates = [], ticks = [], previousSession = null;
+  let ranked = [], buildings = [], districts = [], gates = [], ticks = [], agents = [], previousSession = null;
   const cache = new Map();
   function set(layout, session) {
     if (session !== previousSession) { cache.clear(); previousSession = session; }
@@ -38,7 +38,8 @@ export function createLabels(container) {
       const font = district ? '700 15px "Arial Narrow", sans-serif' : '12px monospace'; measure.font = font;
       return { text, layer, position, district, gate, font, width: measure.measureText(text).width + 12 };
     }
-    districts = layout.districts.filter(d => !d.gate && !d.tick).map(d => record(d.label, d.layer,
+    agents=layout.districts.filter(d=>d.agent).map(d=>({...record(d.label,null,new THREE.Vector3(d.x,d.labelHeight,d.z0),true),agent:true,color:d.color,metropolis:d.metropolis,hovered:d.hovered}));
+    districts = layout.districts.filter(d => !d.gate && !d.tick && !d.agent).map(d => record(d.label, d.layer,
       new THREE.Vector3(-6, 12, (d.z0 + d.z1) / 2), true));
     gates = layout.districts.filter(d => d.gate).map(d => record(d.label, null,
       new THREE.Vector3(0, d.labelHeight, d.z0), true, true));
@@ -69,7 +70,7 @@ export function createLabels(container) {
     for (const r of ranked) {
       if (story.length >= 5) break;
       if (hidden.has(r.layer)) continue;
-      const p = r.position.clone(); if (!r.gate && !r.tick) p.y *= heightScale; p.project(camera);
+      const p = r.position.clone(); if (!r.gate && !r.tick && !r.agent) p.y *= heightScale; p.project(camera);
       if (p.z >= -1 && p.z <= 1 && Math.abs(p.x) < .94 && Math.abs(p.y) < .9) story.push({ ...r, ...r.short, position: r.position, story: true });
     }
     const newest = buildings.findLast(r => r.isNew);
@@ -78,6 +79,7 @@ export function createLabels(container) {
     function* candidates() {
       yield* gates;
       yield* story;
+      for(const a of agents)if(a.hovered||a.metropolis||camera.position.distanceTo(a.position)<600)yield a;
       if (near) {
         for (let i = lowerBound(camera.position.z - 110); i < buildings.length && buildings[i].position.z <= camera.position.z + 110; i++) yield buildings[i];
       } else yield* districts;
@@ -88,7 +90,7 @@ export function createLabels(container) {
       if (count >= 60 || used >= pool.length) break;
       if (!r.gate && hidden.has(r.layer)) continue;
       if (!r.story && !r.district && camera.position.distanceTo(r.position) > 110) continue;
-      const p = r.position.clone(); if (!r.gate && !r.tick) p.y *= heightScale; p.project(camera);
+      const p = r.position.clone(); if (!r.gate && !r.tick && !r.agent) p.y *= heightScale; p.project(camera);
       if (p.z < -1 || p.z > 1) continue;
       const w = r.width, h = r.district ? 25 : 22;
       let x = (p.x + 1) * width / 2 - w / 2, y = (1 - p.y) * height / 2 - h;
@@ -100,12 +102,17 @@ export function createLabels(container) {
       if (y < (r.story ? Math.max(4, topInset) : 4) || (!r.gate && overlaps())) continue;
       occupied.push({ x, y, w, h });
       const el = pool[used++]; if (!r.gate) count++;
+      // Keep district chips from adding DOM style writes while the camera rests.
+      const prior=el.labelSignature;
+      if(r.agent&&prior&&prior.text===r.text&&prior.color===r.color&&prior.font===r.font&&prior.x===x&&prior.y===y&&prior.anchorY===anchorY&&el.style.display==='block')continue;
+      el.labelSignature=r.agent?{text:r.text,color:r.color,font:r.font,x,y,anchorY}:null;
       el.className=`context-city-label ${r.gate?'context-city-label--gate':r.tick?'context-city-label--tick':r.district?'context-city-label--district':'context-city-label--block'}`;
       if(r.layer)el.dataset.layer=r.layer;else delete el.dataset.layer;
       el.style.setProperty('--label-lift', `${Math.max(0, anchorY-y)}px`);
-      el.style.setProperty('--layer-color',r.gate?THEME.ink:colorFor(r.layer));
+      el.style.setProperty('--layer-color',r.color??(r.gate?THEME.ink:colorFor(r.layer)));
+      el.style.border=r.agent?`1px solid ${r.color}`:'';
       el.textContent = r.text;
-      Object.assign(el.style, { display: 'block', font: `var(--context-city-label-font, ${r.font})`, color: r.gate ? THEME.ink : colorFor(r.layer), left: `${x}px`, top: `${y}px` });
+      Object.assign(el.style, { display: 'block', font: `var(--context-city-label-font, ${r.font})`, color: r.agent?THEME.ink:r.gate ? THEME.ink : colorFor(r.layer), left: `${x}px`, top: `${y}px` });
     }
     for (; used < pool.length; used++) pool[used].style.display = 'none';
   }

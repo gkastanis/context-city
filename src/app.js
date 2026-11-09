@@ -1,4 +1,5 @@
 import { panelState, escapeAction } from './ui/overlay-state.js';
+import { readDistrictPreference } from './ui/district-preference.js';
 import { agentCalls, linkedRun, runLabel } from './ui/agents.js';
 import { el, button } from './ui/dom.js';
 import { parseFiles, droppedFiles } from './ui/loader.js';
@@ -62,6 +63,10 @@ const enter = id => { game.enter(id); call('enterBlock', id); };
 const reader = createReaderPane(enter, { linked: block => linkedRun(session, block), openRun: switchRun });
 const index = createContextIndex({ fly: id => { select(id); call('flyToBlock', id); },
   enter: id => { select(id); enter(id); }, filter: (layer, visible) => call('setLayerVisible', layer, visible) });
+let districtPreference=readDistrictPreference();
+const districtCheck=el('input',{id:'layer-subagents',type:'checkbox',checked:districtPreference,onchange:()=>{districtPreference=districtCheck.checked;call('setDistrictsVisible',districtPreference);}});
+const districtLayer=el('label',{class:'layer-check',for:'layer-subagents',hidden:true},districtCheck,'Subagent districts');
+index.root.querySelector('details').append(districtLayer);
 index.root.querySelector('h2').after(agentList);
 const timeline = createTimeline(jump, switchRun);
 let pendingEvents = [];
@@ -175,7 +180,8 @@ app.append(drop);
 timeline.root.querySelector('.timeline-head').prepend(game.play, game.rate, game.pause, game.stop);
 app.classList.add('hide-reader');
 const tapeTools = el('div', { class: 'tape-tools' });
-tapeTools.append(app.querySelector('.walk-controls'), el('div', { class: 'camera-controls', 'aria-label': 'Camera controls' }, button('Overview', () => call('overview')), button('Whole session', () => call('showWholeSession')), button('Full window', () => call('showFullWindow')), button('Exit inside', () => call('exitInside'))));
+const metropolisButton=button('Metropolis',()=>call('showMetropolis'),{hidden:true});
+tapeTools.append(app.querySelector('.walk-controls'), el('div', { class: 'camera-controls', 'aria-label': 'Camera controls' }, button('Overview', () => call('overview')), metropolisButton, button('Whole session', () => call('showWholeSession')), button('Full window', () => call('showFullWindow')), button('Exit inside', () => call('exitInside'))));
 const tapeToggle = button('More', () => {
   const open = tapeToggle.getAttribute('aria-expanded') !== 'true';
   tapeToggle.setAttribute('aria-expanded', String(open)); app.classList.toggle('show-tape-tools', open);
@@ -245,8 +251,11 @@ function renderIndex() {
   if (!layout) return;
   index.render(session, layout); index.highlight(selected);
 }
+let navigationRestoreIdx = null;
 const sceneRequests = createRequestScheduler(async idx => {
-  await call('setRequest', idx);
+  const restore = idx === navigationRestoreIdx;
+  navigationRestoreIdx = null;
+  await call('setRequest', idx, { restore });
   if (pendingFinding?.idx === idx && requestIdx === idx) {
     const id = pendingFinding.id; pendingFinding = null; call('flyToBlock', id);
   }
@@ -287,6 +296,7 @@ function jump(value, settled = false) {
 }
 function renderAgents() {
   const runs = mainSession?.agents ?? [], ids = agentCalls(mainSession);
+  districtLayer.hidden=metropolisButton.hidden=!!activeRun||!runs.length;
   agentBanner.hidden = bannerDismissed || !!activeRun || !!runs.length || !ids.length;
   agentBanner.querySelector('p').textContent = `This session ran ${ids.length} ${ids.length === 1 ? 'subagent' : 'subagents'}. Their work is stored separately. Pick the project folder or drop the session .jsonl together with its <session-id> folder to include them. Other sessions are ignored.`;
   breadcrumb.hidden = !activeRun;
@@ -314,6 +324,7 @@ function switchRun(run, returnTarget = null) {
   activeRun = run;
   setSession(run?.session ?? mainSession, true);
   if (!run) {
+    navigationRestoreIdx = mainPosition;
     jump(mainPosition, true);
     if (mainSelected && itemById.has(mainSelected)) select(mainSelected, false, false);
     setPanel('index-panel', true);
@@ -325,10 +336,12 @@ function switchRun(run, returnTarget = null) {
 function setSession(value, navigating = false) {
   if (!navigating) { bannerDismissed = false; mainSession = value; activeRun = null; mainPosition = 0; }
   renderAgents();
+  navigationRestoreIdx = null;
   pendingFinding = null;
   sceneRequests.reset(); pendingEvents = []; reader.reset(value.meta.redacted === true); lastSettled = -1;
   layout = null; itemById.clear(); index.reset(); selected = null;
   session = value; requestIdx = 0; reading = 'stopped';
+  districtCheck.checked=districtPreference;
   const meta = session.meta;
   redactedNotice.hidden = !meta.redacted;
   redactedNotice.textContent = meta.redacted ? "Real session, text redacted before publishing. Shapes, sizes, order, timing and tool loads are real; only 8 of the owner's prompts are readable." : '';
@@ -428,6 +441,8 @@ try {
   scene = createScene(stage, {
     onSelect: id => select(id), onHover: id => select(id, true),
     onBackgroundClick: backgroundClick,
+    onAgentHover: () => game.findDistrict(),
+    onAgentOpen: id => {game.findDistrict();switchRun(mainSession?.agents?.find(a=>a.agentId===id));},
     onReadPosition: ({ blockId }) => { if (selected !== blockId) { select(blockId); index.reveal(blockId); } },
     onModeChange: (value, details) => {
       mode.textContent = value === 'reading' ? 'Walking the sequence' : value === 'inside' ? 'Inside a block' : 'City';

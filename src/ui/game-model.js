@@ -7,6 +7,7 @@ export function gameFacts(session) {
   const firstPrompt = first?.blockIds.map(id => session.blocks[id]).find(b => b?.kind === 'user_text' && b.layer === 'message')
     ?? blocks.find(b => b.kind === 'user_text' && b.layer === 'message');
   const quests = [];
+  if(session.agents?.length)quests.push({id:'subagent',label:'Find a subagent district',sentence:'Subagent districts keep their working context outside the main session.',action:'district'});
   const add = (id, label, block, sentence, action = 'select') => {
     if (block) quests.push({ id, label, blockId: block.id, sentence, action });
   };

@@ -123,7 +123,7 @@ HTML comment openers in embedded data are escaped without changing their values.
 The build rejects relative imports, unsafe HTML assignments, em dashes, document
 wrappers, unescaped comment openers, non-ASCII output and output over 3 MB.
 
-No scene API extension was required. The UI owns full-length text rendering and
+The UI owns full-length text rendering and
 tracks its playback button state through mode callbacks. Layer checkboxes reset
 when loading another session because `setSession` resets scene layer visibility.
 
@@ -296,6 +296,49 @@ Findings ranks large results, prompt cache rebuilds, repeated calls, unused tool
 
 The panel shows up to 12 entries. Click or press Enter to jump to a request and select its block. Close or Escape dismisses the panel. The run summary links to the top finding. Results are memoised per session and transcript-derived strings render as text nodes.
 
+## Metropolis
+
+When subagent runs are loaded, Metropolis beside Overview frames the main city,
+the canal and all subagent districts. Overview continues to frame the main city.
+Each district is a compact grid of its run's own blocks. Tower footprints are capped at 7 units. Extra token volume goes into height,
+split into tower groups at the skyline ceiling.
+The main road follows world Z; districts sit across the canal on positive X beyond the road strip.
+Fork positions anchor districts along the road, parallel lanes step further
+across the canal, and collisions move districts along the road. Unlinked runs sit
+beyond the main city. Sessions without runs create no district resources.
+
+A thin outbound arch starts at the Agent call. The return arch ends at the
+foreground result or background completion notification. Its width uses a capped
+square root of that block's estimated tokens. Hover a district for the branch
+graph's timing tooltip. Hover a bridge for returned tokens, context kept outside
+the main session and the peak-to-return ratio. Missing returns have no return
+bridge or ratio. Click a district to fly toward it before opening the run.
+Keyboard users can open the same runs from Index or the timeline branch graph.
+Double clicking a district does not enter a main-city block. Back to main session
+restores the main request after viewing a run.
+
+Before a fork, only the foundation outline appears. During a run, the displayed
+request follows main-request time, or proportional request progress when times
+are missing. Running and open runs have lit windows; merged runs keep their final
+state with dim windows. Arriving on a merge request sends a light along the return
+arch for 0.8 seconds. Reduced motion makes the transition instant. Narrow screens
+and low quality disable ripples and bridge glow first. All district buildings
+share one InstancedMesh; bridge segments and foundations each share another.
+District labels use the existing label pool and appear only nearby or on hover.
+
+Index, Layers, Subagent districts hides districts, bridges and canal together.
+Its boolean preference is saved in localStorage inside guarded calls; transcript
+content is never stored. The layer and Metropolis control appear only when runs
+exist in the main view. Field guide adds Find a subagent district only in that case.
+The axis and district visibility preferences are the only saved values.
+
+`dev/t14-probe.mjs` uses synthetic branch fixtures at 1440 and 400 pixels and an
+optional real transcript supplied through T14_REAL_MAIN. It reports numbers only,
+hides transcript-derived labels in real screenshots, and measures median frame
+intervals with districts enabled and disabled. T14_BASELINE can point at a saved
+source tree for the no-runs screenshot comparison. Screenshot output defaults to
+dev/shots and can be redirected with T14_SHOTS.
+
 ## Subagents
 
 Load several transcript files with the file picker, drop files and folders together,
@@ -334,8 +377,8 @@ idle gaps over 15 minutes into breaks capped at twelve pixels each and 20% of
 the total width. Nearby dense break marks merge. Gaps during foreground work
 remain active time. Sessions with only long gaps spread by request index. The
 sparkline, playhead, events, branch endpoints and seeking share the chosen scale.
-Missing times interpolate between timestamped neighbours. The axis preference is
-the only value saved in localStorage; transcript text is never saved. By time is
+Missing times interpolate between timestamped neighbours. The axis preference and
+district visibility are the only values saved in localStorage; transcript text is never saved. By time is
 disabled when fewer than two requests have timestamps.
 
 Overlapping branches use separate rows, packed for the chosen axis, with at most
