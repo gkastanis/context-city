@@ -91,7 +91,7 @@ test('missing fork anchors on merge, and absent anchors use the unlinked row',()
 });
 
 test('example framing excludes pending plots and includes existing districts',async()=>{
-  const session=JSON.parse(await readFile(new URL('../sample/agents-session.json',import.meta.url),'utf8'));
+  const session=JSON.parse(await readFile(new URL('../sample/real-agents-session.json',import.meta.url),'utf8'));
   const branches=agentBranches(session),positions={end:Math.max(...session.requests.map(r=>r.measuredTokens))*.01};
   for(const b of branches){
     for(const [id,idx] of [[b.forkBlockId,b.fork],[b.mergeBlockId,b.merge]]){

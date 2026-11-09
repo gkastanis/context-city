@@ -1,8 +1,9 @@
 import { createReadStream } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, readdir, mkdir, stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { createHash } from 'node:crypto';
 import { createParser } from '../src/parse.js';
 
 const kinds = ['system', 'tool_def', 'user_text', 'reminder', 'assistant_text', 'thinking', 'tool_use', 'tool_result', 'attachment'];
@@ -158,7 +159,93 @@ export function makeReport(original, output, serialized = JSON.stringify(output,
   return { report: lines.join('\n') + '\n', stats };
 }
 
+// Targeted publication mode for an isolated session on a public repository.
+// IDs are deliberately preserved: main-thread calls and agent metadata share them.
+export function redactTranscript(text, user, privateWords = [], ids = new Map()) {
+  if (!user || !/^[\w.-]+$/.test(user)) throw new Error('A local username is required');
+  const escaped = user.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  for (const word of privateWords) {
+    const literal = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    text = text.replace(new RegExp(/^[a-z0-9]+$/i.test(word) ? `\\b${literal}\\b` : literal, 'gi'), 'demo');
+  }
+  return text
+    .replace(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9-]+(?:\.[A-Z0-9-]+)+/gi, 'demo@example.com')
+    .replace(/(?:\/(?:home|Users)\/[^/\s"\\]+|~)\/\.claude\/projects\/[^/\s"\\]+/g, '/home/demo/.claude/projects/demo-project')
+    .replace(/\/(?:home|Users)\/[^/\s"\\]+/g, '/home/demo')
+    .replace(/\/tmp\/cc-demo-[a-z0-9]+/gi, '/tmp/demo')
+    .replace(new RegExp(`(?<![\\w-])${escaped}(?![\\w-])`, 'g'), 'demo')
+    .replace(/\b(?:[a-f0-9]{64}|[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12})\b/gi, value => {
+      if (!ids.has(value)) ids.set(value, `demo-id-${ids.size + 1}`);
+      return ids.get(value);
+    });
+}
+
+export async function redactFolder(input, output, user, privateWords = []) {
+  const names = (await readdir(input)).filter(n => n.endsWith('.jsonl')).sort();
+  if (names.length !== 1 || resolve(input) === resolve(output)) throw new Error('Expected one main transcript');
+  const main = names[0], id = main.slice(0, -6);
+  const childDir = join(input, id, 'subagents');
+  const children = (await readdir(childDir)).filter(n => /^agent-.+\.(jsonl|meta\.json)$/.test(n)).sort();
+  // Read and transform before creating output. Never write an unredacted byte.
+  const ids = new Map();
+  const files = [];
+  for (const name of [main, ...children.map(n => join(id, 'subagents', n))]) {
+    const raw = await readFile(join(input, name), 'utf8');
+    if (name.endsWith('.meta.json')) {
+      const content = redactTranscript(raw, user, privateWords, ids);
+      JSON.parse(content);
+      files.push([name, content]);
+      continue;
+    }
+    const records = raw.split('\n').filter(line => line.trim()).map(line => JSON.parse(line));
+    const canonical = value => Array.isArray(value) ? value.map(canonical)
+      : value && typeof value === 'object' ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])])) : value;
+    const hash = message => createHash('sha256').update(JSON.stringify(canonical(message))).digest('hex');
+    const wanted = new Set(records.flatMap(r => r.type === 'api-request' ? r.tail ?? [] : []));
+    const recovered = new Map();
+    const remember = message => {
+      const key = hash(message);
+      if (wanted.has(key)) recovered.set(key, message);
+    };
+    // Redaction changes message digests. Materialize only hash-verified messages
+    // before replacing text/IDs so the real parser retains exact relationships.
+    let groups = new Map();
+    const flush = () => {
+      for (const parts of groups.values()) {
+        const content = [...parts].sort(([a], [b]) => typeof a === 'number' && typeof b === 'number' ? a - b : 0).flatMap(([, v]) => typeof v === 'string' ? [{ type: 'text', text: v }] : v);
+        remember({ role: 'assistant', content });
+        remember({ role: 'assistant', content: content.filter(p => p.type !== 'thinking') });
+      }
+      groups = new Map();
+    };
+    for (const record of records) {
+      if (record.type === 'api-request') flush();
+      if (record.type === 'user' && record.message) remember(record.message);
+      if (record.type === 'assistant' && record.message && record.message.model !== '<synthetic>') {
+        const key = record.message.id ?? record.requestId;
+        if (!groups.has(key)) groups.set(key, new Map());
+        const parts = groups.get(key);
+        parts.set(record.apiBlockIndex ?? record.uuid ?? parts.size, record.message.content ?? []);
+      }
+    }
+    flush();
+    const blobs = [...recovered].map(([hash, message]) => JSON.stringify({ type: 'api-request-blob', hash, message }));
+    const content = redactTranscript([...blobs, raw].join('\n'), user, privateWords, ids);
+    for (const line of content.split('\n').filter(line => line.trim())) JSON.parse(line);
+    files.push([name, content]);
+  }
+  await mkdir(output, { mode: 0o700 });
+  await mkdir(join(output, id, 'subagents'), { recursive: true, mode: 0o700 });
+  for (const [name, content] of files) await writeFile(join(output, name), content, { mode: 0o600, flag: 'wx' });
+  return { main, children, sessionId: id };
+}
+
 async function main(args) {
+  if (args.length === 5 && args[1] === '--user' && args[3] === '--out' && (await stat(args[0])).isDirectory()) {
+    const result = await redactFolder(args[0], args[4], args[2]);
+    process.stdout.write(JSON.stringify({ files: 1 + result.children.length }) + '\n');
+    return;
+  }
   if (args.length !== 7 || args[1] !== '--config' || args[3] !== '--out' || args[5] !== '--report') {
     throw new Error('Usage: node scripts/redact.mjs <session.jsonl> --config <config.json> --out <session.redacted.json> --report <report.txt>');
   }

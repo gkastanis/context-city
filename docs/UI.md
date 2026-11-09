@@ -14,9 +14,9 @@ The opening session is `sample/fresh-session.json`, explicitly marked Example
 session. Load transcript accepts `.jsonl` and `.json` Claude Code record files.
 Drop a file anywhere, or use the picker. Load example opens a keyboard accessible chooser for the invented Lantern settings
 page and the real session that built this page, redacted before publication.
-The third choice, **Session with subagents**, follows PDF export for the fictional Lantern project with five helper runs, four in the background and one foreground review. It includes parallel branches, a 20 minute pause, cache usage and a verbose test report that produces a large result finding. Its text and usage counts are invented. `npm run sample:agents` writes temporary transcript and metadata files, reads them through `createParser`, and links them with `agentRun` and `attachAgents` before writing the bundled Session. Loading it preserves the saved timeline axis and opens Overview; the Metropolis button frames the main city, existing district buildings and their bridges at a diagonal 32.5° elevation and FOV 50. A numerical projection fit fills 80% of the largest rectangle clear of the measured open HUD panels, centres the projected box there, and refits when panels change. Pending plots and canal do not contribute to the fit; phones use the same rule.
+The first choice, **A real session with subagents**, is the default: a recorded session that built a feature on this repository with four helper agents. It demonstrates the branch graph and Metropolis view. The other choices are the invented Lantern settings session and the earlier redacted real session.
 
-The opening choice remains the invented example. The real example has 224 requests,
+The earlier real session is the third choice. It has 224 requests,
 1,114 blocks, one compaction and MCP loads. Only 8 owner-approved prompts are
 readable. A quiet banner explains the redaction, and the reader labels removed
 text Redacted with its exact original character count. Ordinary missing transcript

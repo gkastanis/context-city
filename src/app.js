@@ -138,9 +138,9 @@ const speedLabel = el('output', { for: 'reading-speed' }, '220 tokens/s');
 const exampleChooser = el('dialog', { id: 'example-chooser', 'aria-labelledby': 'example-title' },
   el('div', { class: 'help-heading' }, el('h2', { id: 'example-title' }, 'Choose an example'), button('Close', () => exampleChooser.close())),
   ...[
+    ['A real session with subagents', 'A Claude Code session that built a feature on this repo with four helper agents. Shows the branch graph and the Metropolis view.'],
     ['Invented example: Lantern settings page', 'A short invented session with readable text and illustrative token counts.'],
     ['A real session, redacted: the session that built this page', '224 requests, one compaction and real tool loads, with 8 approved prompts.'],
-    ['Session with subagents', 'A feature built with five helper agents. Shows the branch graph, the Metropolis view and how much each helper kept out of the main context.'],
   ].map(([label, line], i) => el('section', {}, button(label, () => { exampleChooser.close(); loadExample(i); }, { id: `example-${i}` }), el('p', { class: 'muted' }, line))));
 const mode = el('span', { id: 'mode-label' }, 'City');
 app.append(el('header', { class: 'card topbar' }, el('div', { class: 'identity' }, el('h1', {}, 'CONTEXT CITY'), el('p', { class: 'subtitle' }, 'Explore the world inside a context window.'), stats, info),
@@ -339,13 +339,13 @@ function setSession(value, navigating = false, startRequest = 0) {
   renderAgents();
   navigationRestoreIdx = null;
   pendingFinding = null;
-  sceneRequests.reset(); pendingEvents = []; reader.reset(value.meta.redacted === true); lastSettled = -1;
+  sceneRequests.reset(); pendingEvents = []; reader.reset(value.meta.redacted === true && !value.meta.targetedRedaction); lastSettled = -1;
   layout = null; itemById.clear(); index.reset(); selected = null;
   session = value; requestIdx = 0; reading = 'stopped';
   districtCheck.checked=districtPreference;
   const meta = session.meta;
   redactedNotice.hidden = !meta.redacted;
-  redactedNotice.textContent = meta.redacted ? "Real session, text redacted before publishing. Shapes, sizes, order, timing and tool loads are real; only 8 of the owner's prompts are readable." : '';
+  redactedNotice.textContent = meta.targetedRedaction ? "Real recorded session. Personal identifiers were replaced before publishing; public code, prompts and tool definitions remain readable." : meta.redacted ? "Real session, text redacted before publishing. Shapes, sizes, order, timing and tool loads are real; only 8 of the owner's prompts are readable." : '';
   info.textContent = `${meta.sample ? 'Example session · ' : ''}${meta.sourceName || 'Session'} · ${meta.model || 'Model unknown'} · ${meta.startedAt?.slice(0, 10) || 'Date unknown'}${meta.endedAt ? ' to ' + meta.endedAt.slice(0, 10) : ''} · ${session.requests.length} ${session.requests.length === 1 ? 'request' : 'requests'}`;
   notice.textContent = meta.source === 'records'
     ? 'This transcript has no request snapshots (older Claude Code). The prefix shows as one block with unknown text.'
@@ -400,7 +400,7 @@ async function loadExample(which = 0) {
     let value;
     if (exampleData != null) value = expandSession(JSON.parse(exampleData[which]), 8);
     else {
-      const response = await fetch(new URL(['../sample/fresh-session.json', '../sample/real-session-redacted.json', '../sample/agents-session.json'][which], import.meta.url));
+      const response = await fetch(new URL(['../sample/real-agents-session.json', '../sample/fresh-session.json', '../sample/real-session-redacted.json'][which], import.meta.url));
       if (!response.ok) throw new Error(`Example load failed (${response.status})`);
       value = await response.json();
     }

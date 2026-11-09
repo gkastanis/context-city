@@ -1,16 +1,76 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { readFile, mkdtemp, rm, mkdir, writeFile, stat, readdir } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseText } from '../src/parse.js';
-import { redactSession, makeReport } from '../scripts/redact.mjs';
+import { redactSession, makeReport, redactFolder, redactTranscript } from '../scripts/redact.mjs';
 
 const fixturePath = new URL('./fixtures/redact-secrets.jsonl', import.meta.url);
 const original = parseText(await readFile(fixturePath, 'utf8'));
 const config = { publicTools: ['Read'], aliases: [{ prefix: 'mcp__public__', alias: 'mcp:site/' }], keepPrompts: [] };
 const secrets = ['sk_FAKE_PLANTED_7z', 'owner@secret.invalid', 'private.secret.invalid', '203.0.113.77', '/home/secret-owner', 'ClientOrchid'];
+
+test('targeted replacements cover paths, encoded directories, emails and owner/group words', () => {
+  const input = 'owner@secret.invalid /home/secret-owner/code /Users/secret-owner/code '
+    + '~/.claude/projects/-home-secret-owner-code/out /tmp/cc-demo-123ab/code '
+    + '-rw-r--r-- 1 secret-owner secret-owner 100 file secret-owner unrelated';
+  const result = redactTranscript(input, 'secret-owner');
+  assert.ok(!result.includes('secret-owner'));
+  assert.ok(!result.includes('-home'));
+  assert.match(result, /demo@example.com/);
+  assert.match(result, /\/home\/demo\/code/);
+  assert.match(result, /demo-project\/out/);
+  assert.match(result, /\/tmp\/demo\/code/);
+  assert.match(result, /1 demo demo 100 file demo unrelated/);
+  assert.equal(redactTranscript('ClientOrchid api_key', 'secret-owner', ['ClientOrchid', 'api_key']), 'demo demo');
+});
+
+test('folder mode retains hash-verified foreground calls, shared IDs and metadata deterministically', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'redact-folder-test-'));
+  try {
+    const input = join(directory, 'raw');
+    await mkdir(join(input, 'session/subagents'), { recursive: true });
+    await mkdir(join(input, 'session/tool-results'));
+    await writeFile(join(input, 'session/tool-results/ignored.txt'), 'Never bundled');
+    const callId = 'a'.repeat(64);
+    const prompt = { role: 'user', content: 'owner@secret.invalid secret-owner' };
+    const call = { role: 'assistant', content: [{ type: 'tool_use', id: callId, name: 'Agent', input: { description: 'Inspect secret-owner', subagent_type: 'Explore' } }] };
+    const result = { role: 'user', content: [{ type: 'tool_result', tool_use_id: callId, content: 'Finished secret-owner' }] };
+    const canonical = v => Array.isArray(v) ? v.map(canonical) : v && typeof v === 'object'
+      ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
+    const hash = m => createHash('sha256').update(JSON.stringify(canonical(m))).digest('hex');
+    const records = [
+      { type: 'api-request-shape', shapeHash: 'shape', shape: { system: ['Public system'], tools: [] } },
+      { type: 'user', message: prompt },
+      { type: 'api-request', id: 'r0', querySource: 'repl_main_thread', shapeHash: 'shape', keep: 0, tail: [hash(prompt)] },
+      { type: 'assistant', requestRef: 'r0', message: { ...call, id: 'answer0', model: 'demo-model' } },
+      { type: 'user', message: result, toolUseResult: { agentId: 'helper' } },
+      { type: 'api-request', id: 'r1', querySource: 'repl_main_thread', shapeHash: 'shape', keep: 1, tail: [hash(call), hash(result)] },
+    ];
+    await writeFile(join(input, 'session.jsonl'), records.map(r => JSON.stringify(r)).join('\n'));
+    await writeFile(join(input, 'session/subagents/agent-helper.jsonl'), records.map(r => JSON.stringify(r)).join('\n'));
+    await writeFile(join(input, 'session/subagents/agent-helper.meta.json'), JSON.stringify({ toolUseId: callId, description: 'secret-owner', agentType: 'Explore' }, null, 2));
+    const out = join(directory, 'out'), again = join(directory, 'again');
+    const first = await redactFolder(input, out, 'secret-owner');
+    assert.deepEqual(await redactFolder(input, again, 'secret-owner'), first);
+    const text = await readFile(join(out, first.main), 'utf8');
+    assert.equal(text, await readFile(join(again, first.main), 'utf8'));
+    const parsed = parseText(text);
+    const agentCall = Object.values(parsed.blocks).find(b => b.toolName === 'Agent' && b.kind === 'tool_use');
+    assert.ok(agentCall);
+    const metadata = JSON.parse(await readFile(join(out, 'session/subagents/agent-helper.meta.json'), 'utf8'));
+    assert.equal(metadata.toolUseId, agentCall.toolUseId);
+    assert.equal(metadata.description, 'demo');
+    assert.ok(!text.includes('secret-owner'));
+    assert.ok(!text.includes('owner@secret.invalid'));
+    assert.equal((await stat(join(out, first.main))).mode & 0o777, 0o600);
+    assert.deepEqual(await readdir(join(out, 'session')), ['subagents']);
+    await assert.rejects(redactFolder(input, out, 'secret-owner'));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
 function values(value) {
   if (typeof value === 'string') return [value];
   return value && typeof value === 'object' ? Object.values(value).flatMap(values) : [];

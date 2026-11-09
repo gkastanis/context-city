@@ -122,8 +122,8 @@ export async function build({ sample = null, pages = false } = {}) {
   // Worker code has no top-level await: classic Blob workers cannot parse it.
   const worker = (await bundle('src/worker.js')).replace(/await __load\("src\/worker.js"\);$/, () => '__load("src/worker.js");');
   if (/await import\(/.test(worker)) throw new Error('Worker must have no external imports');
-  sample ??= await read('sample/fresh-session.json');
-  const rawExamples = [sample, await read('sample/real-session-redacted.json'), await read('sample/agents-session.json')];
+  sample ??= await read('sample/real-agents-session.json');
+  const rawExamples = [sample, await read('sample/fresh-session.json'), await read('sample/real-session-redacted.json')];
   const examples = rawExamples.map(raw => {
     const value = JSON.parse(raw);
     const wire = value.blocks && value.requests ? compactSession(value) : value;
@@ -131,9 +131,10 @@ export async function build({ sample = null, pages = false } = {}) {
   });
   const replacements = new Map([
     ['src/ui/loader.js', (await read('src/ui/loader.js')).replace('null; /* WORKER_SOURCE */', () => `${JSON.stringify(worker)}; /* WORKER_SOURCE */`)],
-    ['src/app.js', (await read('src/app.js')).replace('null; /* SAMPLE_DATA */', () => `${JSON.stringify(examples)}; /* SAMPLE_DATA */`)],
+    ['src/app.js', await read('src/app.js')],
   ]);
-  const javascript = await bundle('src/app.js', replacements);
+  // Insert opaque transcript data after source transforms: recorded code is data.
+  const javascript = (await bundle('src/app.js', replacements)).replace('null; /* SAMPLE_DATA */', () => `${JSON.stringify(examples)}; /* SAMPLE_DATA */`);
   const asciiJS = javascript.replace(/[^\x00-\x7f]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
     .replace(/<\/script/gi, match => '<\\/' + match.slice(2)).replace(/<!--/g, () => '<\\!--')
     .replace(/<script/gi, match => '\\u003c' + match.slice(1));
@@ -141,9 +142,9 @@ export async function build({ sample = null, pages = false } = {}) {
   const fallback = 'Loading the 3D view. If this stays, your network blocks cdn.jsdelivr.net, which serves the 3D library.';
   const fragment = `<title>Context City</title>\n<meta name="claude:viewport-fit-sides" content="cover">\n<style>\n${css}\n</style>\n<link rel="icon" href="data:,">\n<div id="app"><p>${fallback}</p></div>\n<script type="module">\n${asciiJS}\n</script>\n`;
   const output = pages ? `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">${fragment.slice(0, fragment.indexOf('<div id="app">'))}</head><body>${fragment.slice(fragment.indexOf('<div id="app">'))}</body></html>\n` : fragment;
-  if (/(?:from\s*|import\s*\()(['"])\.{1,2}\//.test(output)) throw new Error('Relative import remains');
+  if (/(?:from\s*|import\s*\()(['"])\.{1,2}\//.test(output.replace(/const exampleData = .*; \/\* SAMPLE_DATA \*\//, ''))) throw new Error('Relative import remains');
   if (/innerHTML\s*=/.test(output)) throw new Error('Unsafe HTML assignment');
-  if (javascript.includes('\u2014')) throw new Error('Em dash in artifact');
+  if (javascript.replace(/const exampleData = .*; \/\* SAMPLE_DATA \*\//, '').includes('\u2014')) throw new Error('Em dash in artifact');
   if (/[^\x00-\x7f]/.test(output)) throw new Error('Artifact must be pure ASCII');
   if (asciiJS.includes('<!--')) throw new Error('Unescaped HTML comment in script');
   if (/<\/?(?:html|head|body)(?:\s|>)/i.test(fragment)) throw new Error('Artifact contains document wrapper tags');

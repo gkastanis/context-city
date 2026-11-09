@@ -14,8 +14,8 @@ test('standalone artifact bundles modules, worker and example with valid module 
   const { output: html } = await build();
   assert.ok(html.startsWith('<title>Context City</title>\n<meta name="claude:viewport-fit-sides" content="cover">\n<style>'));
   assert.doesNotMatch(html, /<\/?(?:html|head|body)(?:\s|>)/i);
-  assert.doesNotMatch(html, /(?:from\s*|import\s*\()(['"])\.{1,2}\//);
-  assert.doesNotMatch(html, /innerHTML\s*=|\u2014/);
+  assert.doesNotMatch(html.replace(/const exampleData = .*; \/\* SAMPLE_DATA \*\//, ''), /(?:from\s*|import\s*\()(['"])\.{1,2}\//);
+  assert.doesNotMatch(html.replace(/const exampleData = .*; \/\* SAMPLE_DATA \*\//, ''), /innerHTML\s*=|\u2014/);
   assert.ok(Buffer.byteLength(html) < 3 * 1024 * 1024);
   assert.equal((html.match(/<script\b/g) ?? []).length, 1);
   assert.equal((html.match(/<\/script>/g) ?? []).length, 1);
@@ -83,20 +83,20 @@ test('all three compact embedded examples preserve every request and approved te
   assert.equal(script(pages.output), script(artifact.output));
   assert.equal(pages.output.match(/<style>([\s\S]*?)<\/style>/)[1], artifact.output.match(/<style>([\s\S]*?)<\/style>/)[1]);
   const embedded = JSON.parse(artifact.output.match(/const exampleData = (.*); \/\* SAMPLE_DATA \*\//)[1]);
-  for (const [i, filename] of ['fresh-session.json', 'real-session-redacted.json', 'agents-session.json'].entries()) {
+  for (const [i, filename] of ['real-agents-session.json', 'fresh-session.json', 'real-session-redacted.json'].entries()) {
     const original = JSON.parse(await readFile(new URL('../sample/' + filename, import.meta.url), 'utf8'));
     const wire = JSON.parse(embedded[i]);
     assert.ok(wire.requests.every(r => !Object.hasOwn(r, 'blockIds') && !Object.hasOwn(r, 'newBlockIds')));
     const expanded = expandSession(wire);
     assert.deepEqual(expanded, original);
     assert.ok(artifact.exampleSizes[i].after < artifact.exampleSizes[i].before);
-    if (i === 2) {
-      assert.ok(artifact.exampleSizes[i].after < 400000);
-      assert.equal(agentBranches(expanded).length, 5);
-      assert.equal(original.agents.length, 5);
-      assert.match(artifact.output, /Session with subagents/);
+    if (i === 0) {
+      assert.ok(artifact.exampleSizes[i].after < 500000);
+      assert.equal(agentBranches(expanded).length, 4);
+      assert.equal(original.agents.length, 4);
+      assert.match(artifact.output, /A real session with subagents/);
     }
-    if (i === 1) {
+    if (i === 2) {
       assert.equal(original.requests.length, 224);
       assert.equal(Object.keys(original.blocks).length, 1114);
       assert.equal(original.events.filter(e => e.type === 'compaction').length, 1);

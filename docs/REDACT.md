@@ -15,9 +15,39 @@ Stdout contains only JSON statistics; errors contain no transcript excerpts.
 
 ## Subagent files
 
-The redaction script handles one transcript at a time. It does not yet collect
-subagent files or metadata. Redact each subagent transcript separately and review
-its output before sharing. Agent metadata descriptions are not handled yet.
+Folder mode preserves the content of an isolated public-repository session while
+replacing identifiers consistently across the main transcript, agent transcripts
+and agent metadata. It excludes saved tool output and all other files:
+
+```sh
+node scripts/redact.mjs /path/to/raw --user LOCAL_USER --out /tmp/new-redacted-folder
+npm run sample:real -- /path/to/raw --user LOCAL_USER
+```
+
+The raw folder must contain one main JSONL and its matching session directory.
+Folder output must not already exist. Temporary directories and files are owner-only.
+The sample command parses only redacted files with `createParser`, `agentRun` and
+`attachAgents`, deletes its temporary directory even on failure, and writes
+`sample/real-agents-session.json`. It starts at the earliest request with the
+maximum number of concurrent runs. It is deterministic for the same inputs.
+
+Every email becomes `demo@example.com`; home directories become `/home/demo`;
+the supplied username becomes `demo` in paths, owner/group columns and standalone
+words. Encoded Claude project directories become `demo-project`, and temporary
+clone directories become `/tmp/demo`. UUIDs and 64-hex identifiers receive stable
+first-occurrence IDs shared across all files. Before replacement, messages that
+match recorded SHA-256 references are materialized from their recorded parts, so
+changing their text cannot break parser recovery. Agent relationships remain intact.
+Public source, prompts and tool definitions otherwise survive. This mode is for
+an owner-reviewed isolated public session, not arbitrary private transcripts.
+
+For a local private-word gate, the sample command also accepts
+`--private-words /path/to/local-list.txt`. Matching follows the existing privacy
+scan: alphanumeric words use word boundaries, other entries use literal matching,
+case-insensitively. Matches become `demo`; the list and originals are never emitted.
+Regenerate with the same list for reproducibility. This sample was generated with
+the repository's untracked local list. Neither mode bundles saved tool outputs.
+Single-file mode below retains its original default-deny behavior.
 
 ## What survives
 

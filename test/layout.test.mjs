@@ -104,6 +104,7 @@ function containsForbidden(text, token) {
 const root = new URL('../', import.meta.url);
 const privatePaths = new RegExp('/(?:' + ['home', 'srv', 'mnt', 'Users'].join('|') + ')\\b', 'i');
 function genericPrivacyHits(text) {
+  text = text.replace(new RegExp('/' + 'home/demo(?=/|[^a-z0-9_.-]|$)', 'gi'), '/demo');
   const hits = [];
   if (privatePaths.test(text)) hits.push('local path');
   for (const match of text.matchAll(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g)) {
@@ -115,7 +116,7 @@ function genericPrivacyHits(text) {
     hits.push('IPv4 address');
   }
   for (const match of text.matchAll(/\b[A-Z0-9._%+-]+@([A-Z0-9-]+(?:\.[A-Z0-9-]+)*\.[A-Z]{2,})\b/gi)) {
-    if (!match[1].toLowerCase().endsWith('.invalid')) hits.push('email address');
+    if (match[0].toLowerCase() !== 'demo@example.com' && !match[1].toLowerCase().endsWith('.invalid')) hits.push('email address');
   }
   if (/\b[a-f0-9]{64}\b/i.test(text)) hits.push('64-hex string');
   if (/\b[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}\b/i.test(text)) hits.push('UUID');
@@ -156,6 +157,9 @@ test('every tracked and new text file passes publication privacy checks', async 
 });
 
 test('generic privacy detectors catch identifiers and allow documentation examples', () => {
+  assert.deepEqual(genericPrivacyHits('/' + 'home/demo/file demo@example.com'), []);
+  assert.deepEqual(genericPrivacyHits('/' + 'home/demo-other/file'), ['local path']);
+  assert.deepEqual(genericPrivacyHits('demo@' + 'example.com.invalid-domain.com'), ['email address']);
   for (const name of ['home', 'srv', 'mnt', 'Users']) assert.deepEqual(genericPrivacyHits('/' + name + '/synthetic'), ['local path']);
   const address = parts => parts.join('.');
   for (const parts of [[10, 2, 3, 4], [100, 64, 0, 1]]) assert.deepEqual(genericPrivacyHits(address(parts)), ['IPv4 address']);

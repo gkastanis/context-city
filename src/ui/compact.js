@@ -27,7 +27,22 @@ export function forEachRequestChange(session, visit) {
 
 // Wire format: one shared blocks table and transferred integer request deltas.
 // Each tape entry is [keep, addCount, newCount, ...add, ...newBlockIds].
-export function compactSession(session) {
+// Root texts share block text/note/label across runs. A string entry may reuse
+// an earlier prefix as [index, prefixLength, suffix]; legacy wires still expand.
+export function compactSession(session, shared = null) {
+  const root = shared == null;
+  shared ??= { texts: [], indices: new Map() };
+  const blocks = Object.fromEntries(Object.entries(session.blocks).map(([id, block]) => {
+    const copy = { ...block };
+    for (const key of ['text', 'note', 'label']) {
+      if (typeof copy[key] !== 'string') continue;
+      if (!shared.indices.has(copy[key])) {
+        shared.indices.set(copy[key], shared.texts.length); shared.texts.push(copy[key]);
+      }
+      copy[key] = shared.indices.get(copy[key]);
+    }
+    return [id, copy];
+  }));
   const ids = Object.keys(session.blocks), indices = new Map(ids.map((id, i) => [id, i]));
   // A missing id must fail loudly, not become index 0 and show the wrong block.
   const indexOf = id => {
@@ -52,10 +67,34 @@ export function compactSession(session) {
   });
   const tape = new Int32Array(offsets[offsets.length - 1]);
   chunks.forEach((chunk, i) => tape.set(chunk, offsets[i]));
-  return { ...(session.agents ? { agents: session.agents.map(a => ({ ...a, session: compactSession(a.session) })) } : {}), meta: session.meta, blocks: session.blocks, events: session.events, requests, ids, offsets, tape };
+  const agents = session.agents?.map(a => ({ ...a, session: compactSession(a.session, shared) }));
+  const prefixes = new Map();
+  return { ...(session.agents ? { agents } : {}), ...(root ? { texts: shared.texts.map((text, idx, all) => {
+    let best = -1, length = 0;
+    const key = text.slice(0, 16), candidates = prefixes.get(key) ?? [];
+    for (const i of candidates) {
+      let n = 0;
+      while (n < text.length && n < all[i].length && text[n] === all[i][n]) n++;
+      if (n > length) { best = i; length = n; }
+    }
+    candidates.push(idx);
+    if (candidates.length > 64) candidates.shift();
+    prefixes.set(key, candidates);
+    return length > 16 ? [best, length, text.slice(length)] : text;
+  }) } : {}), meta: session.meta, blocks, events: session.events, requests, ids, offsets, tape };
 }
 
-export function expandSession(wire, cacheLimit = 8) {
+export function expandSession(wire, cacheLimit = 8, texts = wire.texts) {
+  if (texts === wire.texts && texts) {
+    const decoded = [];
+    for (const entry of texts) decoded.push(Array.isArray(entry) ? decoded[entry[0]].slice(0, entry[1]) + entry[2] : entry);
+    texts = decoded;
+  }
+  const blocks = texts ? Object.fromEntries(Object.entries(wire.blocks).map(([id, block]) => {
+    const copy = { ...block };
+    for (const key of ['text', 'note', 'label']) if (typeof copy[key] === 'number') copy[key] = texts[copy[key]];
+    return [id, copy];
+  })) : wire.blocks;
   const { ids, offsets } = wire;
   const tape = wire.tape instanceof Int32Array ? wire.tape : new Int32Array(wire.tape);
   const cache = new Map();
@@ -85,7 +124,7 @@ export function expandSession(wire, cacheLimit = 8) {
     blockIds: { enumerable: true, get: () => materialize(i).blockIds },
     newBlockIds: { enumerable: true, get: () => materialize(i).newBlockIds },
   }));
-  const session = { ...(wire.agents ? { agents: wire.agents.map(a => ({ ...a, session: expandSession(a.session, cacheLimit) })) } : {}), meta: wire.meta, blocks: wire.blocks, events: wire.events, requests };
+  const session = { ...(wire.agents ? { agents: wire.agents.map(a => ({ ...a, session: expandSession(a.session, cacheLimit, texts) })) } : {}), meta: wire.meta, blocks, events: wire.events, requests };
   requestTapes.set(session, { ids, offsets, tape });
   return session;
 }
