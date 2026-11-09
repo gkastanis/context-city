@@ -295,3 +295,26 @@ manual checks.
 Findings ranks large results, prompt cache rebuilds, repeated calls, unused tools, compaction pressure and sudden context growth by input token cost. Cost chips label estimated or measured input. Result shares use estimated sizes; displayed block tokens scale like the reader. Rebuilds subtract truly new tokens on the same scale and attribute context changes before considering expiry. The rebuild summary follows the first rebuild without adding ranking cost or badge count. Unused tools cover the main thread and flag excluded subagent calls.
 
 The panel shows up to 12 entries. Click or press Enter to jump to a request and select its block. Close or Escape dismisses the panel. The run summary links to the top finding. Results are memoised per session and transcript-derived strings render as text nodes.
+
+## Subagents
+
+Load several transcript files with the file picker, drop files and folders together,
+or use Load a session folder. Drop the main .jsonl with its matching session folder
+to include subagents. Folder drops recursively read all directory batches. Agent
+metadata is optional. A lone agent file opens its own requests. Files are parsed
+one at a time in the worker and compacted before the next file starts.
+
+When Agent results identify runs but none are loaded, a quiet banner offers to add
+them. Its picker accepts files or a folder without parsing the main transcript
+again. The Subagents section in Index lists type, description, request count,
+measured input, cache hit rate and originating main request. Unlinked runs remain
+available. Selecting a run replaces the city, timeline and reader with that run.
+A breadcrumb and Back to main session button restore the saved main request.
+Escape retains its existing panel and scene meanings.
+
+Linked Agent calls and results offer Open this subagent run in Reader. Findings
+remain one ranked list across the loaded session, prefix agent entries with their
+type, and open the corresponding run and request. Unused tool checks include calls
+in all loaded threads. Run summary adds run and request counts plus whole-session
+input split by cache reads, writes and uncached input; existing totals are labelled
+main thread. Missing usage is omitted from measured totals.

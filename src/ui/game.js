@@ -1,9 +1,10 @@
 import { el, button, svgEl } from './dom.js';
-import { formatTokens, sessionCache } from './math.js';
+import { formatTokens, sessionCache, wholeSessionCache } from './math.js';
 import { gameFacts, crossedEvents } from './game-model.js';
 import { findings } from './findings.js';
 
-export function createGame({ call, jump, locate, showFindings = () => {}, queueEvent = () => {} }) {
+export function createGame({ call, jump, locate, showFindings = () => {}, summarySession = () => null, queueEvent = () => {} }) {
+  let states = new WeakMap();
   let session, facts, current = 0, found = new Set(), playing = false, timer = 0, walkTimer = 0, walkMs = 0;
   let guessTimer = 0, guessShown = false, completed = false;
   let introTimers = [], cancelIntro = null, toastTimer = 0, walking = false, lastWalk = 0;
@@ -44,20 +45,33 @@ export function createGame({ call, jump, locate, showFindings = () => {}, queueE
   const summaryDialog = el('dialog', { id: 'run-summary', 'aria-labelledby': 'summary-heading' });
   function summary(completion = false) {
     if (!session) return;
-    const rows = [ ['Peak context', formatTokens(facts.peak)], ['Compactions', facts.compactions],
-      ['Tools loaded mid-session', facts.toolsLoaded], ['Tool definitions at the last request', `${facts.toolShare.toFixed(1)}% (estimated)`],
-      ['Longest single block', `${formatTokens(facts.biggest?.estTokens ?? 0)} tokens (estimated)`], ['Total requests', session.requests.length] ];
+    const source = summarySession() ?? session;
+    const summaryFacts = source === session ? facts : gameFacts(source);
+    const rows = [ ['Peak context', formatTokens(summaryFacts.peak)], ['Compactions', summaryFacts.compactions],
+      ['Tools loaded mid-session', summaryFacts.toolsLoaded], ['Tool definitions at the last request', `${summaryFacts.toolShare.toFixed(1)}% (estimated)`],
+      ['Longest single block', `${formatTokens(summaryFacts.biggest?.estTokens ?? 0)} tokens (estimated)`], ['Total requests', source.requests.length] ];
+    if (source.agents?.length) {
+      for (const row of rows) row[0] += ' (main thread)';
+      rows.push(['Subagent runs', source.agents.length],
+        ['Subagent requests', source.agents.reduce((n, a) => n + a.session.requests.length, 0)]);
+      const whole = wholeSessionCache(source);
+      if (whole) rows.push(['Whole session input', `${formatTokens(whole.total)} tokens: ${formatTokens(whole.read)} read from cache, ${formatTokens(whole.write)} written to cache, ${formatTokens(whole.uncached)} uncached (${(whole.hitRate * 100).toFixed(1)}% cache hit rate)`]);
+    }
     // Input tokens summed over every request that reported usage (each request resends the context).
-    const cache = sessionCache(session.requests);
+    const cache = sessionCache(source.requests);
     if (cache) rows.push(['Input read from cache', formatTokens(cache.read)], ['Input written to cache', formatTokens(cache.write)],
       ['Uncached input', formatTokens(cache.uncached)], ['Cache hit rate', `${(cache.hitRate * 100).toFixed(1)}% of ${formatTokens(cache.total)} input tokens`]);
-    const cacheBar = cache && el('div', { class: 'cache-bar cache-bar--wide', role: 'img', 'aria-label': `Input over the whole session: ${(cache.hitRate * 100).toFixed(1)}% read from cache` },
+    if (source.agents?.length) {
+      const start = rows.findIndex(r => r[0] === 'Input read from cache');
+      if (start >= 0) for (let i = start; i < rows.length; i++) rows[i][0] += ' (main thread)';
+    }
+    const cacheBar = cache && el('div', { class: 'cache-bar cache-bar--wide', role: 'img', 'aria-label': `Input over the ${source.agents?.length ? 'main thread' : 'whole session'}: ${(cache.hitRate * 100).toFixed(1)}% read from cache` },
       ...[['read', cache.read], ['write', cache.write], ['uncached', cache.uncached]].map(([kind, v]) => { const seg = el('i', { class: `cache-seg cache-${kind}` }); seg.style.width = `${v / cache.total * 100}%`; return seg; }));
     const cacheKey = cache && el('p', { class: 'cache-key muted' }, el('i', { class: 'cache-dot cache-read' }), 'read from cache ', el('i', { class: 'cache-dot cache-write' }), 'written to cache ', el('i', { class: 'cache-dot cache-uncached' }), 'uncached. Usage is reported per request, so it cannot be split per block.');
     summaryDialog.replaceChildren(el('div', { class: 'help-heading' }, el('h2', { id: 'summary-heading' }, completion === true ? 'Every discovery found' : 'Your run'), button('Close', () => summaryDialog.close())),
       el('p', { class: 'muted' }, completion === true ? 'You explored the whole Field guide. Here is your session.' : 'A session in numbers.'), el('dl', { class: 'run-stats' }, ...rows.flatMap(([label, value]) => [el('dt', {}, label), el('dd', {}, String(value))])));
     if (cache) summaryDialog.append(cacheBar, cacheKey);
-    const top = findings(session)[0];
+    const top = findings(source)[0];
     summaryDialog.append(el('p', { class: 'summary-finding' }, top ? `Top finding: ${top.title}` : 'No problems found in this session.',
       button('Show findings', () => { summaryDialog.close(); showFindings(); })));
     if (completion === true) summaryDialog.append(button('Replay the session', () => { summaryDialog.close(); jump(0, true); play.click(); }, { class: 'primary' }));
@@ -84,10 +98,10 @@ export function createGame({ call, jump, locate, showFindings = () => {}, queueE
   const interruptIntro = event => { if (!intro.hidden && !intro.contains(event.target)) skipIntro(); };
   for (const name of ['pointerdown', 'wheel', 'keydown']) document.addEventListener(name, interruptIntro, { passive: true });
   const intro = el('div', { id: 'city-intro', class: 'card', hidden: true }, el('span', { class: 'eyebrow' }, 'Welcome to the city'), caption, button('Skip', skipIntro, { id: 'skip-intro' }));
-  function skipIntro() {
+  function skipIntro(invite = true) {
     const active = !intro.hidden;
     introTimers.forEach(clearTimeout); introTimers = []; intro.hidden = true;
-    if (active && session?.requests.length) inviteGuess();
+    if (invite !== false && active && session?.requests.length) inviteGuess();
     const cancel = cancelIntro; cancelIntro = null; if (typeof cancel === 'function') cancel();
   }
   function inviteGuess() {
@@ -150,12 +164,18 @@ export function createGame({ call, jump, locate, showFindings = () => {}, queueE
   return { guide, guess, intro, toast, summaryDialog, play, pause, stop, rate, summary, update, startIntro, skipIntro, pausePlayback, mode,
     toggleGuess() { clearTimeout(guessTimer); guess.hidden = !guess.hidden; },
     select: id => checkBlock(id, false), enter: id => checkBlock(id, true),
-    setSession(value) {
-      skipIntro(); pausePlayback(); clearInterval(walkTimer); walkMs = 0; walking = false;
+    setSession(value, navigating = false) {
+      skipIntro(false); pausePlayback();
+      if (navigating && session) states.set(session, { found, completed, guessShown, walkMs,
+        guessNodes: [...guessBody.childNodes] });
+      if (!navigating) states = new WeakMap();
+      const saved = states.get(value);
+      clearInterval(walkTimer); walkMs = saved?.walkMs ?? 0; walking = false;
       clearTimeout(toastTimer); toast.hidden = true; if (summaryDialog.open) summaryDialog.close();
-      clearTimeout(guessTimer); guessShown = false; completed = false;
-      session = value; facts = gameFacts(value); current = 0; found = new Set(); renderQuests();
-      play.disabled = !session.requests.length; guess.hidden = true; guessBody.replaceChildren(button('How much of this city is tools? Take a guess', () => showGuess()));
+      clearTimeout(guessTimer); guessShown = saved?.guessShown ?? false; completed = saved?.completed ?? false;
+      session = value; facts = gameFacts(value); current = 0; found = saved?.found ?? new Set(); renderQuests();
+      play.disabled = !session.requests.length; guess.hidden = true;
+      guessBody.replaceChildren(...(saved?.guessNodes ?? [button('How much of this city is tools? Take a guess', () => showGuess())]));
     },
     dispose() { for (const name of ['pointerdown', 'wheel', 'keydown']) document.removeEventListener(name, interruptIntro); skipIntro(); pausePlayback(); clearInterval(walkTimer); clearTimeout(toastTimer); clearTimeout(guessTimer); },
   };

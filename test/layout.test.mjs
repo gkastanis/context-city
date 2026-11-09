@@ -122,13 +122,13 @@ function genericPrivacyHits(text) {
   return hits;
 }
 
-test('every tracked text file passes publication privacy checks', async t => {
+test('every tracked and new text file passes publication privacy checks', async t => {
   const excluded = new Set(['test/fixtures/redact-secrets.jsonl', 'test/redact.test.mjs']);
   // Paths listed in .publishignore stay in the private repo and are never published.
   let unpublished = [];
   try { unpublished = (await readFile(new URL('../.publishignore', import.meta.url), 'utf8')).split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#')); } catch {}
   const isUnpublished = f => unpublished.some(p => p.endsWith('/') ? f.startsWith(p) : f === p);
-  const files = execFileSync('git', ['ls-files', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(f => f && !excluded.has(f) && !isUnpublished(f));
+  const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'], { cwd: root, encoding: 'utf8' }).split('\0').filter(f => f && !excluded.has(f) && !isUnpublished(f));
   let local = [];
   try {
     local = (await readFile(new URL('./private-words.local.txt', import.meta.url), 'utf8')).split(/\r?\n/).map(w => w.trim()).filter(Boolean);
@@ -150,7 +150,7 @@ test('every tracked text file passes publication privacy checks', async t => {
       if (containsForbidden(text, word)) hits.push(`${file}: local word ${index + 1}`);
     }
   }
-  t.diagnostic(`Privacy scan: ${count} tracked text files; ${hits.length} hits; local word list ${local.length ? 'present' : 'empty or absent'}`);
+  t.diagnostic(`Privacy scan: ${count} tracked and new text files; ${hits.length} hits; local word list ${local.length ? 'present' : 'empty or absent'}`);
   assert.deepEqual(hits, []);
 });
 

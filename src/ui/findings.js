@@ -1,3 +1,4 @@
+import { allAgentsLoaded, runLabel } from './agents.js';
 import { formatTokens } from './math.js';
 import { forEachRequestChange } from './compact.js';
 
@@ -14,9 +15,29 @@ const json = b => { try { return b?.text == null ? null : JSON.parse(b.text); } 
 // Only scalar per-block statistics and newly observed occurrences are retained.
 export function findings(session) {
   if (memo.has(session)) return memo.get(session);
+  const runs = session.agents ?? [];
+  const sessions = [session, ...runs.map(a => a.session)];
+  const used = new Set(sessions.flatMap(s => Object.values(s.blocks).filter(b => b.kind === 'tool_use').map(b => b.toolName)));
+  const complete = allAgentsLoaded(session);
+  const out = findingsFor(session, used, complete);
+  for (const run of runs) for (const f of findingsFor(run.session, used, complete)) {
+    out.push({ ...f, id: run.agentId + ':' + f.id, agentId: run.agentId, title: runLabel(run) + ': ' + f.title });
+  }
+  if (runs.length) {
+    out.sort((a, b) => b.cost - a.cost);
+    for (const summary of out.filter(f => f.kind === 'cache_rewrite' && f.cost === 0)) {
+      out.splice(out.indexOf(summary), 1);
+      const first = out.findIndex(f => f.kind === 'cache_rewrite' && f.agentId === summary.agentId);
+      out.splice(first + 1, 0, summary);
+    }
+  }
+  memo.set(session, out);
+  return out;
+}
+function findingsFor(session, used, complete) {
   const { blocks, requests } = session;
   const out = [], stats = new Map(), maxima = new Map(), occurrences = [], tails = [], tops = [];
-  const active = new Map(), used = new Set(Object.values(blocks).filter(b => b.kind === 'tool_use').map(b => b.toolName));
+  const active = new Map();
   const heavyRequests = new Set(), heavyBlocks = new Set();
   const contextChanges = new Set((session.events ?? [])
     .filter(e => ['tool_loaded', 'deferred_tools', 'mcp_instructions'].includes(e.type)).map(e => e.requestIdx));
@@ -146,8 +167,8 @@ export function findings(session) {
     return names.slice(0, 8).join(', ') + (names.length > 8 ? ` and ${names.length - 8} more` : '');
   };
   const carryCost = ids => ids.reduce((n, id) => n + size(blocks[id]) * stats.get(id).count, 0);
-  const subagents = session.meta?.sidechainRequests > 0 ? ' Subagent calls are not counted, so some of these may have been used by subagents.' : '';
-  if (unused.length) add('unused_tools', 'all', `${plural(unused.length, 'tool')} ${unused.length === 1 ? 'was' : 'were'} never called in the main thread`, `${describe(unused)}. ${tokens(carryCost(unused))} of estimated input across requests carried these definitions.${subagents}`, carryCost(unused), defsIdx, unused[0]);
+  const subagents = !complete && (session.meta?.sidechainRequests > 0 || Object.values(blocks).some(b => b.agentId)) ? (session.agents?.length ? ' Some subagent runs are not loaded, so some of these may have been used by subagents.' : ' Subagent calls are not counted, so some of these may have been used by subagents.') : '';
+  if (unused.length) add('unused_tools', 'all', `${plural(unused.length, 'tool')} ${unused.length === 1 ? 'was' : 'were'} never called${complete ? '' : ' in the main thread'}`, `${describe(unused)}. ${tokens(carryCost(unused))} of estimated input across requests carried these definitions.${subagents}`, carryCost(unused), defsIdx, unused[0]);
   const servers = new Map();
   for (const id of unused) {
     const server = serverName(blocks[id].toolName);
@@ -157,7 +178,7 @@ export function findings(session) {
   for (const [server, ids] of servers) {
     if (usedServers.has(server)) continue;
     const n = ids.reduce((sum, id) => sum + size(blocks[id]), 0);
-    add('unused_tools', server, `MCP server ${server}: ${plural(ids.length, 'tool')}, ${tokens(n)} per request, never called in the main thread`,
+    add('unused_tools', server, `MCP server ${server}: ${plural(ids.length, 'tool')}, ${tokens(n)} per request, never called${complete ? '' : ' in the main thread'}`,
       `${describe(ids)}. Sizes and carry cost are estimated.${subagents}`, carryCost(ids), defsIdx, ids[0], n);
   }
   for (const [i, e] of compactions.entries()) {
@@ -188,6 +209,5 @@ export function findings(session) {
     const [summary] = out.splice(summaryIdx, 1);
     out.splice(out.findIndex(f => f.kind === 'cache_rewrite') + 1, 0, summary);
   }
-  memo.set(session, out);
   return out;
 }

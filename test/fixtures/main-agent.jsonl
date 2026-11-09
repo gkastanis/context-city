@@ -1,0 +1,9 @@
+{"type": "api-request-shape", "shapeHash": "shape-demo", "shape": {"system": ["Synthetic system."], "tools": [{"name": "Agent", "description": "Synthetic tool.", "input_schema": {"type": "object", "properties": {}}}, {"name": "Bash", "description": "Synthetic tool.", "input_schema": {"type": "object", "properties": {}}}, {"name": "Read", "description": "Synthetic tool.", "input_schema": {"type": "object", "properties": {}}}]}}
+{"type": "api-request-blob", "hash": "prompt", "message": {"role": "user", "content": "Review a synthetic square."}}
+{"type": "api-request", "id": "main-1", "querySource": "repl_main_thread", "shapeHash": "shape-demo", "keep": 0, "tail": ["prompt"]}
+{"type": "api-request-blob", "hash": "call", "message": {"role": "assistant", "content": [{"type": "tool_use", "id": "call-review", "name": "Agent", "input": {"description": "Review the square"}}]}}
+{"type": "api-request", "id": "main-2", "querySource": "repl_main_thread", "shapeHash": "shape-demo", "keep": 0, "tail": ["prompt", "call"]}
+{"type": "user", "toolUseResult": {"agentId": "run", "status": "completed"}, "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call-review", "content": "Synthetic review complete."}]}}
+{"type": "api-request-blob", "hash": "result", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call-review", "content": "Synthetic review complete."}]}}
+{"type": "api-request", "id": "main-3", "querySource": "repl_main_thread", "shapeHash": "shape-demo", "keep": 0, "tail": ["prompt", "call", "result"]}
+{"type": "assistant", "requestRef": "main-3", "message": {"id": "answer-main-3", "role": "assistant", "content": [{"type": "text", "text": "Synthetic answer."}], "usage": {"input_tokens": 100, "cache_read_input_tokens": 200, "cache_creation_input_tokens": 100}}}

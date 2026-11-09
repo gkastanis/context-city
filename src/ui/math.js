@@ -66,7 +66,7 @@ export function requestStories(session) {
     const tokens = added.reduce((n, b) => n + b.estTokens, 0) * (r.measuredTokens != null && r.estTokens ? r.measuredTokens / r.estTokens : 1);
     const news = compact ? `Compaction: ${formatTokens(compact.data.preTokens)} to ${formatTokens(compact.data.postTokens)}`
       : `+${added.length} blocks, ${formatTokens(tokens)} tokens${largest ? ': ' + (largest.label || largest.kind).slice(0, 80) : ''}`;
-    return { caption: `Request ${idx + 1}. ${prompt || 'No user prompt recorded'}. ${news}`, compacted: !!compact };
+    return { caption: `Request ${idx + 1}. ${prompt || 'No user prompt recorded'}${/[.!?]$/.test(prompt) ? '' : '.'} ${news}`, compacted: !!compact };
   });
 }
 export function fuelState(total, limit, compacted = false) {
@@ -76,4 +76,9 @@ export function fuelState(total, limit, compacted = false) {
   const t = (fill - stops[i]) / (stops[i + 1] - stops[i]);
   return { fill, color: `rgb(${colors[i].map((v, j) => Math.round(v + (colors[i + 1][j] - v) * t)).join(',')})`,
     status: compacted ? 'Compacted' : fill >= .85 ? 'Nearly full' : fill >= .5 ? 'Filling up' : 'Plenty of room' };
+}
+
+// All usage remains measured; missing usage is omitted as in sessionCache.
+export function wholeSessionCache(session) {
+  return sessionCache([session, ...(session.agents ?? []).map(a => a.session)].flatMap(s => s.requests));
 }

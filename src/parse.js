@@ -96,16 +96,46 @@ const usageOf = (u, previous = {}) => u ? {
 const measured = u => u ? u.input + u.cacheRead + u.cacheWrite : null;
 
 export function createParser(options = {}) {
+  const thread = options.thread ?? 'auto';
+  if (!['main', 'agent', 'auto'].includes(thread)) throw new Error('Unknown parser thread');
+  if (thread === 'auto') {
+    let main = createParser({ ...options, thread: 'main' });
+    let agent = createParser({ ...options, thread: 'agent' }), result;
+    let sawMain = false;
+    return {
+      push(line) {
+        try {
+          const r = JSON.parse(line);
+          const mainRecord = r && r.isSidechain !== true && (r.type === 'assistant' ||
+            r.type === 'api-request' && (r.querySource?.startsWith('repl_main_thread') || r.querySource === 'sdk'));
+          if (mainRecord) { sawMain = true; agent = null; }
+          else if (r?.type === 'user' && r.isSidechain !== true) sawMain = true;
+          else if (!sawMain && r?.type === 'api-request' && r.querySource?.startsWith('agent:')) main = null;
+        } catch { /* The selected parser accounts for malformed lines. */ }
+        main?.push(line);
+        agent?.push(line);
+      },
+      finish() {
+        if (result) return result;
+        const primary = main?.finish();
+        const alternate = agent?.finish();
+        return result = primary?.requests.length ? primary : alternate?.requests.length ? alternate : primary ?? alternate;
+      },
+    };
+  }
+
+  const agentThread = thread === 'agent';
   const session = {
     meta: { sessionId: null, sourceName: basename(options.sourceName), model: null, cliVersion: null,
       startedAt: null, endedAt: null, window: 1000000, autocompactAt: null,
+      thread, ...(agentThread ? { agent: { agentId: null, querySource: null } } : {}),
       sample: false, skippedLines: 0, ignoredRecords: 0, sidechainRequests: 0, source: 'empty', emptyReason: null },
     blocks: {}, requests: [], events: [],
   };
   const shapes = new Map(), blobs = new Map(), requestById = new Map();
   const records = [], groups = new Map(), responseOrder = [], toolNames = new Map(), exactMessages = new Map();
   const dirtyGroups = new Set();
-  const resultRecords = new Map();
+  const resultRecords = new Map(), agentResults = new Map();
   const resultTools = new Map(), nodes = new Map(), fallbackGroups = new Map(), promptEligibility = new Map(), promptTexts = new Map();
   let recentUsers = [], lastNode = null, sawApi = false, hasOrigins = false;
   const knownIgnored = new Set(['file-history-snapshot', 'summary', 'progress', 'queue-operation', 'system']);
@@ -160,7 +190,7 @@ export function createParser(options = {}) {
       if (part.type === 'tool_use') {
         toolNames.set(part.id, part.name);
         return [block({ ...common, kind: 'tool_use', layer: 'tool_call', label: part.name ?? 'Tool call',
-          toolName: part.name ?? null, text: serialize(part) })];
+          toolName: part.name ?? null, toolUseId: part.id, text: serialize(part) })];
       }
       if (part.type === 'image') return [image(part, common)];
       if (part.type === 'tool_result') {
@@ -174,7 +204,7 @@ export function createParser(options = {}) {
           });
         }
         const id = block({ ...common, kind: 'tool_result', layer: 'results', label: 'Tool result',
-          toolName: toolNames.get(part.tool_use_id) ?? null, text: serialize(part) });
+          toolName: toolNames.get(part.tool_use_id) ?? null, toolUseId: part.tool_use_id, text: serialize(part) });
         resultTools.set(id, part.tool_use_id);
         return [id];
       }
@@ -204,15 +234,21 @@ export function createParser(options = {}) {
     }
     // Attachment and harness records participate in parentUuid ancestry even
     // when they contribute no context block. Compaction starts a fresh chain.
-    if (!r.isSidechain && r.uuid && r.type !== 'user' && r.type !== 'assistant') {
+    if ((agentThread || !r.isSidechain) && r.uuid && r.type !== 'user' && r.type !== 'assistant') {
       nodes.set(r.uuid, { ids: [], parent: r.subtype === 'compact_boundary' ? null : r.parentUuid !== undefined ? r.parentUuid : lastNode });
       lastNode = r.uuid;
     }
     if (r.type === 'api-request') {
       flushWire();
       sawApi = true;
-      if (r.isSidechain === true || !(r.querySource?.startsWith('repl_main_thread') || r.querySource === 'sdk')) {
+      const eligible = agentThread ? r.querySource?.startsWith('agent:')
+        : r.isSidechain !== true && (r.querySource?.startsWith('repl_main_thread') || r.querySource === 'sdk');
+      if (!eligible) {
         meta.sidechainRequests++; current = null; return;
+      }
+      if (agentThread) {
+        meta.agent.agentId ??= typeof r.agentId === 'string' ? r.agentId : null;
+        meta.agent.querySource ??= r.querySource;
       }
       meta.model ??= r.params?.model ?? null;
       current = { id: r.id, base: r.base, querySource: r.querySource, users: recentUsers, shapeHash: r.shapeHash, keep: r.keep ?? 0, tail: r.tail ?? [],
@@ -232,7 +268,7 @@ export function createParser(options = {}) {
       return;
     }
     if (r.type === 'api-request-blob') { blobs.set(r.hash, parts(r.message ?? {})); return; }
-    if (r.isSidechain === true) return;
+    if (agentThread ? r.isSidechain !== true : r.isSidechain === true) return;
     if (r.type === 'assistant') {
       const message = r.message ?? {};
       if (message.model === '<synthetic>') {
@@ -300,6 +336,12 @@ export function createParser(options = {}) {
     if (r.type === 'user') {
       if (r.message) {
         const ids = parts(r.message, 'reconstructed', 'Recovered from user record; wire text may differ');
+        if (typeof r.toolUseResult?.agentId === 'string') {
+          for (const id of ids) {
+            const call = resultTools.get(id);
+            if (call) agentResults.set(call, r.toolUseResult.agentId);
+          }
+        }
         const hash = messageHash(r.message);
         exactMessages.set(hash, ids);
         promptEligibility.set(hash, isPrompt(r));
@@ -605,6 +647,7 @@ export function createParser(options = {}) {
       const result = session.blocks[id];
       if (result) {
         result.toolName = toolNames.get(callId) ?? null;
+        if (agentResults.has(callId) && ['Agent', 'Task'].includes(result.toolName)) result.agentId = agentResults.get(callId);
         result.label = result.toolName ? `${result.toolName} result` : 'Tool result';
       }
     }

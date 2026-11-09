@@ -1,5 +1,6 @@
+import { agentCalls, linkedRun, runLabel } from './ui/agents.js';
 import { el, button } from './ui/dom.js';
-import { parseFile } from './ui/loader.js';
+import { parseFiles, droppedFiles } from './ui/loader.js';
 import { createTimeline } from './ui/timeline.js';
 import { createReaderPane } from './ui/reader.js';
 import { createContextIndex } from './ui/context-index.js';
@@ -9,7 +10,7 @@ import { createRequestScheduler } from './ui/request-scheduler.js';
 import { createGame } from './ui/game.js';
 import { createFindingsPanel } from './ui/findings-panel.js';
 import { findBlockRequest, expandSession } from './ui/compact.js';
-import { gauge, formatTokens, limitOf } from './ui/math.js';
+import { gauge, formatTokens, limitOf, sessionCache } from './ui/math.js';
 
 const app = document.getElementById('app');
 app.replaceChildren();
@@ -18,6 +19,7 @@ let session = null, scene = null, requestIdx = 0, lastSettled = -1, selected = n
 let sceneReady = false, loadGeneration = 0, reading = 'stopped';
 let layout = null, itemById = new Map();
 let pendingFinding = null;
+let mainSession = null, activeRun = null, mainPosition = 0, mainSelected = null, addMode = false;
 const call = (method, ...args) => {
   try { if (typeof scene?.[method] === 'function') return scene[method](...args); } catch (error) { status.textContent = `Unable to navigate: ${error.message}`; }
 };
@@ -26,8 +28,23 @@ const info = el('p', { id: 'session-info' });
 const notice = el('p', { id: 'session-notice' });
 const redactedNotice = el('p', { id: 'redacted-notice', hidden: true });
 const quiet = el('p', { id: 'session-details', class: 'muted' });
-const fileInput = el('input', { id: 'transcript-file', type: 'file', accept: '.jsonl,.json', hidden: true,
-  onchange: () => { const file = fileInput.files[0]; if (file) loadFile(file); fileInput.value = ''; } });
+const fileInput = el('input', { id: 'transcript-file', type: 'file', accept: '.jsonl,.json', multiple: true, hidden: true,
+  onchange: () => { const files = Array.from(fileInput.files); if (files.length) loadFiles(files, addMode); addMode = false; fileInput.value = ''; } });
+const folderInput = el('input', { id: 'session-folder', type: 'file', multiple: true, webkitdirectory: true, hidden: true,
+  onchange: () => { const files = Array.from(folderInput.files); if (files.length) loadFiles(files, addMode); addMode = false; folderInput.value = ''; } });
+fileInput.addEventListener('cancel', () => { addMode = false; });
+folderInput.addEventListener('cancel', () => { addMode = false; });
+const addPicker = el('dialog', { id: 'add-agents-picker', 'aria-label': 'Add subagent runs' },
+  el('h2', {}, 'Include subagent runs'),
+  button('Choose files', () => { addMode = true; addPicker.close(); fileInput.click(); }),
+  button('Pick the project folder', () => { addMode = true; addPicker.close(); folderInput.click(); }),
+  button('Cancel', () => addPicker.close()));
+const agentBanner = el('div', { id: 'subagent-banner', hidden: true }, el('p'),
+  button('Include subagent runs', () => addPicker.showModal()));
+const breadcrumbText = el('span');
+const breadcrumb = el('div', { id: 'subagent-breadcrumb', hidden: true }, breadcrumbText,
+  button('Back to main session', () => switchRun(null), { id: 'back-main' }));
+const agentList = el('section', { id: 'subagents', hidden: true }, el('h2', {}, 'Subagents'));
 const progress = el('progress', { id: 'load-progress', max: 1, value: 0, 'aria-label': 'Transcript loading progress' });
 const progressName = el('span', { id: 'load-name' });
 const loading = el('div', { id: 'loading', hidden: true }, progressName, progress,
@@ -36,18 +53,22 @@ const stage = el('div', { id: 'stage', 'aria-label': '3D context city' });
 const sceneStatus = el('p', { id: 'scene-status' }, 'Loading the 3D library.');
 const help = createHelp();
 const enter = id => { game.enter(id); call('enterBlock', id); };
-const reader = createReaderPane(enter);
+const reader = createReaderPane(enter, { linked: block => linkedRun(session, block), openRun: switchRun });
 const index = createContextIndex({ fly: id => { select(id); call('flyToBlock', id); },
   enter: id => { select(id); enter(id); }, filter: (layer, visible) => call('setLayerVisible', layer, visible) });
+index.root.prepend(agentList);
 const timeline = createTimeline(jump);
 let pendingEvents = [];
-const game = createGame({ call, jump, showFindings: () => findingPanel.open(), queueEvent: event => pendingEvents.push(event), locate(id) {
+const game = createGame({ call, jump, summarySession: () => mainSession, showFindings: () => findingPanel.open(), queueEvent: event => pendingEvents.push(event), locate(id) {
   const idx = findBlockRequest(session, id);
   if (idx >= 0) { jump(idx, true); select(id); call('flyToBlock', id); }
 } });
 const findingPanel = createFindingsPanel({
   navigate(finding) {
     game.skipIntro(); game.pausePlayback();
+    const target = finding.agentId ? mainSession?.agents?.find(a => a.agentId === finding.agentId) : null;
+    if ((target?.agentId ?? null) !== (activeRun?.agentId ?? null)) switchRun(target);
+    findingPanel.open();
     pendingFinding = finding.blockId ? { idx: finding.requestIdx, id: finding.blockId } : null;
     jump(finding.requestIdx, true);
     if (finding.blockId) select(finding.blockId);
@@ -94,12 +115,13 @@ const exampleChooser = el('dialog', { id: 'example-chooser', 'aria-labelledby': 
   ].map(([label, line], i) => el('section', {}, button(label, () => { exampleChooser.close(); loadExample(i); }, { id: `example-${i}` }), el('p', { class: 'muted' }, line))));
 const mode = el('span', { id: 'mode-label' }, 'City');
 app.append(el('header', { class: 'card topbar' }, el('div', { class: 'identity' }, el('h1', {}, 'CONTEXT CITY'), el('p', { class: 'subtitle' }, 'Explore the world inside a context window.'), stats, info),
-  el('nav', { 'aria-label': 'Session controls' }, button('Load your session', () => fileInput.click(), { class: 'primary', id: 'load-transcript' }),
-    button('Load example', () => exampleChooser.showModal(), { id: 'load-example' }), button('Help and privacy', () => help.open(), { id: 'help' })), fileInput),
+  el('nav', { 'aria-label': 'Session controls' }, button('Load your session', () => { addMode = false; fileInput.click(); }, { class: 'primary', id: 'load-transcript' }),
+    button('Pick the project folder', () => { addMode = false; folderInput.click(); }, { id: 'load-folder' }),
+    button('Load example', () => exampleChooser.showModal(), { id: 'load-example' }), button('Help and privacy', () => help.open(), { id: 'help' })), fileInput, folderInput),
   el('div', { class: 'session-messages' }, notice, quiet, status, loading),
   el('nav', { class: 'viewbar', 'aria-label': 'View controls' }, panelToggle('Index', 'index-panel', 'hide-index'),
     panelToggle('Reader', 'reader-panel', 'hide-reader'), panelToggle('Field guide 0 of 9', 'field-guide', 'hide-guide'), button('Run summary', () => game.summary()), findingPanel.toggle, button('Guess', () => game.toggleGuess()), mode),
-  exampleChooser, workspace, game.guide, game.guess, game.intro, game.toast, game.summaryDialog, findingPanel.root,
+  exampleChooser, addPicker, breadcrumb, agentBanner, workspace, game.guide, game.guess, game.intro, game.toast, game.summaryDialog, findingPanel.root,
   el('section', { class: 'card walk-controls', 'aria-label': 'Walk the sequence' }, el('strong', {}, 'Walk the sequence'), start, pause, stop,
     el('label', { for: 'reading-speed' }, 'Speed'), speed, speedLabel), timeline.root, help.root);
 const compactContext = el('span', { id: 'compact-context' });
@@ -138,6 +160,8 @@ function updateInsets() {
   const rect = stage.getBoundingClientRect();
   const title = app.querySelector('.identity').getBoundingClientRect();
   const tape = timeline.root.getBoundingClientRect();
+  const stripBottom = Math.max(80, ...[breadcrumb, agentBanner].filter(n => !n.hidden).map(n => n.getBoundingClientRect().bottom + 12));
+  app.style.setProperty('--run-content-top', `${stripBottom}px`);
   app.style.setProperty('--findings-bottom', `${rect.bottom - tape.top + 12}px`);
   const panels = [reader.root, game.guide, game.guess, findingPanel.root].filter(n => !n.hidden && getComputedStyle(n).display !== 'none');
   const right = Math.max(0, ...panels.map(n => rect.right - n.getBoundingClientRect().left + 18));
@@ -146,7 +170,7 @@ function updateInsets() {
     : { left: Math.max(title.right + 24, app.classList.contains('hide-index') ? 0 : 320), right: Math.max(24,right), top: 110, bottom: rect.bottom - tape.top + 18 });
 }
 const hudObserver = new ResizeObserver(updateInsets);
-for (const n of [app.querySelector('.identity'), reader.root, index.root, game.guide, game.guess, timeline.root, findingPanel.root]) hudObserver.observe(n);
+for (const n of [app.querySelector('.identity'), reader.root, index.root, game.guide, game.guess, timeline.root, findingPanel.root, breadcrumb, agentBanner]) hudObserver.observe(n);
 new MutationObserver(updateInsets).observe(app, { attributes: true, attributeFilter: ['class'] });
 new MutationObserver(updateInsets).observe(game.guess, { attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true });
 new MutationObserver(() => {
@@ -222,7 +246,48 @@ function jump(value, settled = false) {
   // pointerup and change both settle the same value; rebuild the index once.
   if (settled && idx !== lastSettled) { lastSettled = idx; settleIndex(); }
 }
-function setSession(value) {
+function renderAgents() {
+  const runs = mainSession?.agents ?? [], ids = agentCalls(mainSession);
+  agentBanner.hidden = !!activeRun || !!runs.length || !ids.length;
+  agentBanner.querySelector('p').textContent = `This session ran ${ids.length} ${ids.length === 1 ? 'subagent' : 'subagents'}. Their work is stored separately. Pick the project folder or drop the session .jsonl together with its <session-id> folder to include them. Other sessions are ignored.`;
+  breadcrumb.hidden = !activeRun;
+  app.classList.toggle('viewing-run', !!activeRun);
+  breadcrumbText.textContent = activeRun ? `Main session / ${runLabel(activeRun)}: ${activeRun.description}` : '';
+  agentList.hidden = !runs.length;
+  agentList.replaceChildren(el('h2', {}, 'Subagents'), ...runs.map(run => {
+    const cache = sessionCache(run.session.requests);
+    const total = cache ? `${formatTokens(cache.total)} input tokens, ${(cache.hitRate * 100).toFixed(1)}% cache hit rate` : 'Input tokens and cache hit rate unavailable';
+    const row = button('', () => switchRun(run), { class: 'subagent-row', 'data-agent-id': run.agentId });
+    if (run.agentId === activeRun?.agentId) {
+      row.setAttribute('aria-current', 'true'); row.append(el('span', { class: 'viewing-label' }, 'Viewing'));
+    }
+    row.append(el('strong', {}, runLabel(run)), el('span', {}, run.description),
+      el('span', { class: 'muted' }, `${run.session.requests.length} requests, ${total}. ${run.parentRequestIdx == null ? 'Not linked to a main request' : 'From main request ' + (run.parentRequestIdx + 1)}`));
+    return row;
+  }));
+}
+function switchRun(run) {
+  if (!mainSession) return;
+  const left = activeRun;
+  if (!activeRun) { mainPosition = requestIdx; mainSelected = selected; }
+  activeRun = run;
+  setSession(run?.session ?? mainSession, true);
+  if (!run) {
+    jump(mainPosition, true);
+    if (mainSelected && itemById.has(mainSelected)) select(mainSelected, false, false);
+    app.classList.remove('hide-index');
+    if (narrow.matches) {
+      app.classList.add('hide-reader', 'hide-guide');
+      for (const target of ['reader-panel', 'field-guide']) document.querySelector(`[aria-controls="${target}"]`).setAttribute('aria-expanded', 'false');
+    }
+    document.querySelector('[aria-controls="index-panel"]').setAttribute('aria-expanded', 'true');
+    const row = [...agentList.querySelectorAll('.subagent-row')].find(n => n.dataset.agentId === left?.agentId);
+    row?.focus({ preventScroll: true });
+  } else breadcrumb.querySelector('button').focus({ preventScroll: true });
+}
+function setSession(value, navigating = false) {
+  if (!navigating) { mainSession = value; activeRun = null; mainPosition = 0; }
+  renderAgents();
   pendingFinding = null;
   sceneRequests.reset(); pendingEvents = []; reader.reset(value.meta.redacted === true); lastSettled = -1;
   layout = null; itemById.clear(); index.reset(); selected = null;
@@ -236,10 +301,10 @@ function setSession(value) {
     : meta.source === 'empty' ? `${meta.emptyReason}. Try a main Claude Code session transcript with API requests or assistant records.` : '';
   notice.hidden = !notice.textContent;
   info.title = `${meta.skippedLines || 0} skipped lines · ${meta.sidechainRequests || 0} subagent requests not shown`;
-  game.setSession(session);
-  findingPanel.setSession(session);
+  game.setSession(session, navigating);
+  findingPanel.setSession(mainSession);
   timeline.setSession(session); timeline.update(0); call('setSession', session);
-  if (session.requests.length) { jump(0, true); if (sceneReady) game.startIntro(); }
+  if (session.requests.length) { jump(0, true); if (sceneReady && !navigating) game.startIntro(); }
   else {
     index.root.querySelector('#context-districts').replaceChildren(); reader.show(null);
     ['0', '0.0%', formatTokens(limitOf(meta)), '0'].forEach((text, i) => { statValues[i].textContent = text; });
@@ -247,15 +312,26 @@ function setSession(value) {
   }
   updateReading(); status.textContent = meta.sample ? 'Example session ready.' : 'Transcript ready. File read in this tab.';
 }
-async function loadFile(file) {
-  if (!/\.(jsonl|json)$/i.test(file.name)) { status.textContent = 'Choose a .jsonl or .json transcript file.'; return; }
+async function loadFiles(files, adding = false) {
   const generation = ++loadGeneration; activeLoad?.cancel();
-  status.textContent = file.size > 300 * 1024 * 1024 ? 'This file is over 300 MB. Parsing may take time and use substantial memory. You can cancel.' : 'Reading transcript in this tab.';
-  loading.hidden = false; progress.value = 0; progressName.textContent = file.name;
-  activeLoad = parseFile(file, (bytes, total) => { if (generation === loadGeneration) progress.value = total ? bytes / total : 0; });
-  try { const result = await activeLoad.promise; if (generation === loadGeneration) setSession(result); }
-  catch (error) { if (generation === loadGeneration) status.textContent = error.name === 'AbortError' ? 'Loading cancelled.' : `Unable to read transcript: ${error.message}`; }
-  finally { if (generation === loadGeneration) { activeLoad = null; loading.hidden = true; } }
+  const retainedPosition = activeRun ? mainPosition : requestIdx;
+  status.textContent = files.some(f => f.size > 300 * 1024 * 1024)
+    ? 'A file is over 300 MB. Parsing may take time and use substantial memory. You can cancel.'
+    : 'Reading transcripts in this tab.';
+  loading.hidden = false; progress.value = 0;
+  activeLoad = parseFiles(files, (bytes, total, name) => {
+    if (generation === loadGeneration) { progress.value = total ? bytes / total : 0; progressName.textContent = name; }
+  }, adding ? mainSession : null);
+  try {
+    const result = await activeLoad.promise;
+    if (generation === loadGeneration) {
+      if (adding && !result.added) { status.textContent = 'No subagent files found'; return; }
+      setSession(result.session); if (adding) jump(retainedPosition, true);
+      if (result.skipped) status.textContent += ` Skipped ${result.skipped} other ${result.skipped === 1 ? 'session' : 'sessions'} in this folder.`;
+    }
+  } catch (error) {
+    if (generation === loadGeneration) status.textContent = error.name === 'AbortError' ? 'Loading cancelled.' : `Unable to read transcript: ${error.message}`;
+  } finally { if (generation === loadGeneration) { activeLoad = null; loading.hidden = true; } }
 }
 // The builder replaces this sentinel with data, not another retained Session.
 const exampleData = null; /* SAMPLE_DATA */
@@ -277,17 +353,18 @@ const fileDrag = event => Array.from(event.dataTransfer?.types ?? []).includes('
 document.addEventListener('dragenter', event => { if (fileDrag(event)) { event.preventDefault(); dragDepth++; drop.hidden = false; } });
 document.addEventListener('dragover', event => { if (fileDrag(event)) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; drop.hidden = false; } });
 document.addEventListener('dragleave', event => { if (fileDrag(event) && --dragDepth <= 0) { dragDepth = 0; drop.hidden = true; } });
-document.addEventListener('drop', event => {
+document.addEventListener('drop', async event => {
   if (!fileDrag(event)) return;
   event.preventDefault(); dragDepth = 0; drop.hidden = true;
-  const file = event.dataTransfer.files[0]; if (file) loadFile(file);
+  try { const files = await droppedFiles(event.dataTransfer); if (files.length) loadFiles(files); }
+  catch (error) { status.textContent = `Unable to read folder: ${error.message}`; }
 });
 addEventListener('blur', () => { dragDepth = 0; drop.hidden = true; });
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && !findingPanel.root.hidden && !help.root.open && !exampleChooser.open && !game.summaryDialog.open) {
+  if (event.key === 'Escape' && !findingPanel.root.hidden && !help.root.open && !exampleChooser.open && !addPicker.open && !game.summaryDialog.open) {
     findingPanel.close(); event.preventDefault(); event.stopImmediatePropagation(); return;
   }
-  if (event.key === 'Escape' && !help.root.open && !exampleChooser.open) {
+  if (event.key === 'Escape' && !help.root.open && !exampleChooser.open && !addPicker.open) {
     app.classList.remove('show-menu'); menuToggle.setAttribute('aria-expanded', 'false');
     game.skipIntro(); game.pausePlayback();
     if (scene?.getMode() === 'inside') call('exitInside');

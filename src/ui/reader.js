@@ -1,7 +1,7 @@
 import { el, button } from './dom.js';
 import { formatTokens } from './math.js';
 
-export function createReaderPane(enter) {
+export function createReaderPane(enter, { linked = () => null, openRun = () => {} } = {}) {
   const title = el('h2', {}, 'Read the context');
   const metadata = el('p', { class: 'muted' }), badge = el('p', { class: 'provenance' });
   const content = el('pre', { class: 'reader-text', id: 'block-text' });
@@ -11,7 +11,8 @@ export function createReaderPane(enter) {
   const positions = new Map();
   const more = button('Show more', () => append());
   const inside = button('Enter this block', () => block && enter(block.id), { id: 'enter-block' });
-  const scroll = el('div', { class: 'reader-scroll' }, title, metadata, badge, inside, description, params, content, more);
+  const agentButton = button('Open this subagent run', () => { const run = linked(block); if (run) openRun(run); }, { id: 'open-subagent', hidden: true });
+  const scroll = el('div', { class: 'reader-scroll' }, title, metadata, badge, inside, agentButton, description, params, content, more);
   const root = el('aside', { id: 'reader-panel', class: 'card panel', 'aria-label': 'Reading pane' }, scroll);
   function append() {
     const end = Math.min(block.text?.length ?? 0, offset + 200 * 1024);
@@ -26,6 +27,7 @@ export function createReaderPane(enter) {
     }
     if (block) positions.set(block.id, { offset, top: root.scrollTop });
     const saved = positions.get(value?.id);
+    agentButton.hidden = !linked(value);
     block = value; offset = 0; content.replaceChildren(); params.replaceChildren(); description.textContent = '';
     root.scrollTop = 0; inside.disabled = !block; more.hidden = true;
     if (!block) { title.textContent = 'Read the context'; metadata.textContent = ''; badge.classList.remove('redacted'); badge.textContent = 'Select a building or a block in the index.'; return; }

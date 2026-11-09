@@ -52,7 +52,7 @@ export function compactSession(session) {
   });
   const tape = new Int32Array(offsets[offsets.length - 1]);
   chunks.forEach((chunk, i) => tape.set(chunk, offsets[i]));
-  return { meta: session.meta, blocks: session.blocks, events: session.events, requests, ids, offsets, tape };
+  return { ...(session.agents ? { agents: session.agents.map(a => ({ ...a, session: compactSession(a.session) })) } : {}), meta: session.meta, blocks: session.blocks, events: session.events, requests, ids, offsets, tape };
 }
 
 export function expandSession(wire, cacheLimit = 8) {
@@ -85,7 +85,7 @@ export function expandSession(wire, cacheLimit = 8) {
     blockIds: { enumerable: true, get: () => materialize(i).blockIds },
     newBlockIds: { enumerable: true, get: () => materialize(i).newBlockIds },
   }));
-  const session = { meta: wire.meta, blocks: wire.blocks, events: wire.events, requests };
+  const session = { ...(wire.agents ? { agents: wire.agents.map(a => ({ ...a, session: expandSession(a.session, cacheLimit) })) } : {}), meta: wire.meta, blocks: wire.blocks, events: wire.events, requests };
   requestTapes.set(session, { ids, offsets, tape });
   return session;
 }
@@ -102,4 +102,12 @@ export function findBlockRequest(session, id) {
     for (let j = 0; j < count; j++) if (wire.tape[at + 3 + j] === index) return i;
   }
   return -1;
+}
+
+// Preserve the compact delta index when the root's run collection changes.
+export function sessionWithAgents(session, agents) {
+  const next = { ...session, agents };
+  const wire = requestTapes.get(session);
+  if (wire) requestTapes.set(next, wire);
+  return next;
 }

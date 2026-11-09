@@ -18,6 +18,12 @@ Drag to orbit and scroll to zoom. Use the request slider or Play to move through
 
 - Findings ranks costly context problems and jumps to the request and block behind each one.
 
+## Subagents
+
+Drop the session `.jsonl` together with its `<session-id>` folder to include
+subagent runs, or use Pick the project folder. Other sessions in the folder are ignored. Open each run from Subagents in
+Index or from its Agent block in Reader. Back to main session restores your place.
+
 ## Which transcripts show the full context
 
 Recent Claude Code versions (from about 2.1.296 on, in the author's experience)

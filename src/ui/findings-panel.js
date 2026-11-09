@@ -25,7 +25,7 @@ export function createFindingsPanel({ navigate, onOpen, onClose }) {
   }
   return { root, toggle, open, close,
     setSession(session) {
-      close(false); items = findings(session); badge.textContent = String(items.filter(f => f.id !== 'cache_rewrite:summary').length);
+      close(false); items = findings(session); badge.textContent = String(items.filter(f => !f.id.endsWith('cache_rewrite:summary')).length);
       list.replaceChildren(...items.slice(0, 12).map(f => button('', () => navigate(f), {
         class: `finding finding--${f.kind}`, 'data-finding-id': f.id,
       })));
@@ -33,7 +33,7 @@ export function createFindingsPanel({ navigate, onOpen, onClose }) {
         const f = items[i];
         row.append(el('span', { class: 'finding-marker', 'aria-hidden': 'true' }),
           el('strong', { class: 'finding-title' }, f.title), el('span', { class: 'finding-detail muted' }, f.detail),
-          el('span', { class: 'finding-cost', title: `${f.basis === 'measured' ? 'Measured' : 'Estimated'} input token cost` }, `${formatTokens(f.id === 'cache_rewrite:summary' ? f.tokens : f.cost)} tokens (${f.basis})`));
+          el('span', { class: 'finding-cost', title: `${f.basis === 'measured' ? 'Measured' : 'Estimated'} input token cost` }, `${formatTokens(f.id.endsWith('cache_rewrite:summary') ? f.tokens : f.cost)} tokens (${f.basis})`));
       }
       if (!items.length) list.append(el('p', {}, 'No problems found in this session.'));
       if (items.length > 12) list.append(el('p', { class: 'muted' }, 'Showing the first 12 entries.'));

@@ -8,10 +8,16 @@ node scripts/redact.mjs session.jsonl --config config.json --out session.redacte
 
 Copy `scripts/redact-config.example.json` to start a config. Output paths must be
 distinct from the input and config, and must not already exist. Files are created
-with owner-only permissions. The script uses the unchanged streaming parser in
+with owner-only permissions. The script uses the streaming parser in
 `src/parse.js` and emits the Session contract in `docs/CONTRACT.md`, matching the
 shape loaded from `sample/fresh-session.json`. It does not publish or install it.
 Stdout contains only JSON statistics; errors contain no transcript excerpts.
+
+## Subagent files
+
+The redaction script handles one transcript at a time. It does not yet collect
+subagent files or metadata. Redact each subagent transcript separately and review
+its output before sharing. Agent metadata descriptions are not handled yet.
 
 ## What survives
 
