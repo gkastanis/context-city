@@ -76,7 +76,9 @@ export function agentColor(type) {
 }
 export function agentBranchLabel(run) {
   const duration = runDuration(run);
-  return `${run.label}: ${(run.description || '').slice(0, 80)}, main requests ${run.fork + 1} to ${run.merge + 1}, ${run.requests} requests, peak ${formatTokens(run.peak)}, ${run.hitRate == null ? 'cache hit unavailable' : Math.round(run.hitRate * 100) + '% cache hit'}, ${run.async ? 'ran in the background' : 'main thread waited'}${duration == null ? '' : ', ran ' + durationLabel(duration)}${run.open ? ', has not returned' : ''}`;
+  const task = (run.description || '').slice(0, 80);
+  const label = task && !run.label.includes(task.slice(0, 63)) ? `${run.label}: ${task}` : run.label;
+  return `${label}, main requests ${run.fork + 1} to ${run.merge + 1}, ${run.requests} requests, peak ${formatTokens(run.peak)}, ${run.hitRate == null ? 'cache hit unavailable' : Math.round(run.hitRate * 100) + '% cache hit'}, ${run.async ? 'ran in the background' : 'main thread waited'}${duration == null ? '' : ', ran ' + durationLabel(duration)}${run.open ? ', has not returned' : ''}`;
 }
 export function agentStats(session) {
   const longest = (session.agents ?? []).reduce((best, run) => !best || run.session.requests.length > best.session.requests.length ? run : best, null);
@@ -96,8 +98,11 @@ export function allAgentsLoaded(session) {
     && calls.every(b => runs.some(a => b.toolUseId && a.toolUseId === b.toolUseId))
     && !(session.meta.sidechainRequests > 0);
 }
-export function runLabel(run) {
-  return run.agentType || run.session.meta.agent?.querySource?.split(':').slice(2).join(':') || 'Subagent';
+export function runLabel(run, peers = []) {
+  const type = run.agentType || run.session.meta.agent?.querySource?.split(':').slice(2).join(':') || 'Subagent';
+  const task = (run.description || '').replace(/\s+/g, ' ').trim();
+  const label = task ? `${type}: ${task.length > 64 ? task.slice(0, 63) + '…' : task}` : type;
+  return peers.some(other => other !== run && runLabel(other) === label) ? `${label} (${run.agentId.slice(0, 6)})` : label;
 }
 export function linkedRun(session, block) {
   return (session?.agents ?? []).find(a => a.parentBlockId === block?.id ||

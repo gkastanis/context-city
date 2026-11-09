@@ -1,5 +1,6 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
 import { colorFor, THEME } from './theme.js';
+import { failurePin, districtSkylines } from './failure-model.js';
 
 // A single shader per layer: window cells and silhouette edges need no extra meshes,
 // textures or per-block uniforms. Instance transforms supply the real facade scale.
@@ -58,6 +59,32 @@ float fogFactor=1.-exp(-fogDensity*fogDensity*vFogDepth*vFogDepth);
   });
 }
 
+// Two screen-sized quads per instance: a narrow depth-tested stem and a red cap.
+export function createFailureBeacons(capacity) {
+  const viewport = new THREE.Vector2(1440, 900);
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute([
+    -.5,0,0, .5,0,0, .5,1,0, -.5,1,0,
+    -.5,-.5,1, .5,-.5,1, .5,.5,1, -.5,.5,1,
+  ], 3));
+  geometry.setIndex([0,1,2,0,2,3,4,5,6,4,6,7]);
+  const material = new THREE.ShaderMaterial({ depthTest: true, depthWrite: false, transparent: true,
+    uniforms: { viewport: { value: viewport } },
+    vertexShader: `uniform vec2 viewport; varying vec2 v; varying float cap;
+      void main(){cap=position.z;v=position.xy;
+      vec4 p=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(0.,cap>.5?1.:position.y,0.,1.);
+      if(cap>.5)p.xy+=position.xy*p.w*14./viewport;
+      else p.x+=position.x*p.w*2.5/viewport.x;
+      if(length(instanceMatrix[0].xyz)==0.)p=vec4(2.,2.,2.,1.);gl_Position=p;}`,
+    fragmentShader: `varying vec2 v;varying float cap;void main(){float alpha=.72;
+      if(cap>.5){float d=length(v);if(d>.5)discard;alpha=1.-smoothstep(.32,.5,d);}
+      gl_FragColor=vec4(1.,.08,.12,alpha);}` });
+  const mesh = new THREE.InstancedMesh(geometry, material, capacity);
+  mesh.frustumCulled = false; mesh.renderOrder = 4;
+  mesh.onBeforeRender = renderer => renderer.getSize(viewport);
+  return mesh;
+}
+
 export function createCity() {
   const group = new THREE.Group(), buildings = new Map(), batches = new Map();
   // City owns these resources. Removing an instance never disposes shared assets.
@@ -74,16 +101,19 @@ export function createCity() {
     const key = `${layer}:${part}`;
     let b = batches.get(key);
     if (!b) {
-      const material = ['beam', 'ring'].includes(part) ? new THREE.MeshBasicMaterial({ color: colorFor(layer), transparent: true,
+      const material = part === 'failure' ? new THREE.MeshBasicMaterial({ color: '#ff3038', toneMapped: false }) : ['beam', 'ring'].includes(part) ? new THREE.MeshBasicMaterial({ color: colorFor(layer), transparent: true,
         opacity: part === 'ring' ? .4 : .24, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, depthWrite: false }) : part === 'pool' ? new THREE.ShaderMaterial({transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,uniforms:{tint:{value:new THREE.Color(colorFor(layer))}},vertexShader:'varying vec3 v;void main(){v=position;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.);}',fragmentShader:'varying vec3 v;uniform vec3 tint;void main(){float a=exp(-dot(v.xz*2.,v.xz*2.)*2.);gl_FragColor=vec4(tint*1.3,a*.11);}'}) : part === 'floor' ?
         new THREE.MeshBasicMaterial({ color: new THREE.Color(colorFor(layer)).multiplyScalar(.55), transparent:true, opacity:.25 }) : facade(layer, part === 'glass');
       if(material.uniforms?.recentStart){material.uniforms.recentStart.value=recentStart;material.uniforms.recentSpan.value=recentSpan;}
       b = { material, capacity: 0, mesh: null }; batches.set(key, b);
     }
     if (count > b.capacity) {
-      if (b.mesh) { b.mesh.removeFromParent(); b.mesh.dispose(); }
+      if (b.mesh) { b.mesh.removeFromParent(); if (part === 'failure') b.mesh.geometry.dispose(); b.mesh.dispose(); }
       b.capacity = Math.max(16, 2 ** Math.ceil(Math.log2(count)));
-      b.mesh = new THREE.InstancedMesh(part === 'beam' ? beam : part === 'ring' ? ring : box, b.material, b.capacity);
+      if (part === 'failure') {
+        const marker = createFailureBeacons(b.capacity);
+        b.material.dispose(); b.material = marker.material; b.mesh = marker;
+      } else b.mesh = new THREE.InstancedMesh(part === 'beam' ? beam : part === 'ring' ? ring : box, b.material, b.capacity);
       b.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       b.mesh.frustumCulled = false; group.add(b.mesh);
     }
@@ -109,6 +139,12 @@ export function createCity() {
     for (const b of batches.values()) if (b.mesh) b.mesh.count = 0;
     for (const [layer, records] of groups) {
       const tools = records.filter(r => r.item.kind === 'tool_def'), beacons = layer === 'message' ? records : [];
+      const failures = records.filter(r => r.item.isError && r.y >= 0 && !falling.includes(r));
+      const alerts = batch(layer, 'failure', failures.length);
+      failures.forEach((r, i) => {
+        const pin = failurePin(r.y + r.item.height, skylines.get(r.item.blockId) ?? r.item.height);
+        transform(alerts, i, 0, pin.base, (r.item.z0 + r.item.z1) / 2, 1, pin.height, 1);
+      });
       const pools = batch(layer, 'pool', records.length);
       const body = batch(layer, 'body', records.length); body.part = 'body';
       const glass = batch(layer, 'glass', tools.length); glass.part = 'glass';
@@ -129,7 +165,7 @@ export function createCity() {
         }
         if (layer === 'message') { transform(rings, bi, 0, .06, z, 1, 1, 1); transform(beams, bi++, 0, r.y + 11, z, 1, 1, 1); }
       });
-      for (const b of [body, glass, floors, beams, rings, pools]) if (b.mesh && b.mesh.count) {
+      for (const b of [body, glass, floors, beams, rings, pools, alerts]) if (b.mesh && b.mesh.count) {
         b.mesh.instanceMatrix.needsUpdate = true;
         if (b.mesh.instanceColor) b.mesh.instanceColor.needsUpdate = true;
       }
@@ -141,11 +177,11 @@ export function createCity() {
     while (lo < hi) { const mid = (lo + hi) >>> 1; if (items[mid].z1 < z) lo = mid + 1; else hi = mid; }
     return lo;
   }
-  let recentStart=0, recentSpan=1;
+  let recentStart=0, recentSpan=1, skylines=new Map();
   return { group, buildings,
     setRange(start,end) { recentStart=start;recentSpan=Math.max(1,end-start);for(const b of batches.values())if(b.material.uniforms?.recentStart){b.material.uniforms.recentStart.value=start;b.material.uniforms.recentSpan.value=recentSpan;} },
     update(layout, filters, animate) {
-      hidden = filters; items = layout.items;
+      hidden = filters; items = layout.items; skylines = districtSkylines(layout);
       const keep = new Set(items.map(it => it.blockId));
       for (const [id, r] of buildings) if (!keep.has(id)) { buildings.delete(id); if (animate) falling.push({ ...r, velocity: 0 }); }
       // A quick reverse scrub revives an item instead of leaving a falling duplicate.
@@ -197,7 +233,7 @@ export function createCity() {
     intro(progress) { let i=0; for (const r of buildings.values()) { r.y = -r.item.height * (1-THREE.MathUtils.clamp(progress*1.5-i++/Math.max(1,buildings.size)*.5,0,1)); } upload(); },
     clear() { buildings.clear(); falling = []; items = []; moving = false; selected = null;
       for (const b of batches.values()) {
-        b.mesh?.removeFromParent(); b.mesh?.dispose(); b.mesh = null; b.capacity = 0;
+        b.mesh?.removeFromParent(); if (b.mesh?.geometry.type === 'PlaneGeometry') b.mesh.geometry.dispose(); b.mesh?.dispose(); b.mesh = null; b.capacity = 0;
       }
       selection.visible = false; },
     dispose() { this.clear(); for (const b of batches.values()) { b.mesh?.dispose(); b.material.dispose(); }

@@ -13,6 +13,27 @@ const original = parseText(await readFile(fixturePath, 'utf8'));
 const config = { publicTools: ['Read'], aliases: [{ prefix: 'mcp__public__', alias: 'mcp:site/' }], keepPrompts: [] };
 const secrets = ['sk_FAKE_PLANTED_7z', 'owner@secret.invalid', 'private.secret.invalid', '203.0.113.77', '/home/secret-owner', 'ClientOrchid'];
 
+test('folder redaction preserves relative record times across runs and shifts dates in text', async () => {
+  const temporary = await mkdtemp(join(tmpdir(),'shift-test-'));
+  try {
+    const input=join(temporary,'raw'), child=join(input,'session','subagents'), output=join(temporary,'out');
+    await mkdir(child,{recursive:true});
+    const start='2025-04-12T13:14:15Z', end='2025-04-12T13:14:17Z';
+    await writeFile(join(input,'session.jsonl'),JSON.stringify({type:'user',timestamp:start,message:{role:'user',content:start}})+'\n'+JSON.stringify({type:'assistant',timestamp:end,message:{role:'assistant',content:[]}}));
+    await writeFile(join(child,'agent-a.jsonl'),JSON.stringify({type:'user',timestamp:Date.parse(end),message:{role:'user',content:end}}));
+    await writeFile(join(child,'agent-a.meta.json'),JSON.stringify({finishedAt:end}));
+    await redactFolder(input,output,'synthetic-user');
+    const main=(await readFile(join(output,'session.jsonl'),'utf8')).trim().split('\n').map(JSON.parse);
+    assert.equal(main[0].timestamp,'2026-01-01T00:00:00Z');
+    assert.equal(main[0].message.content,main[0].timestamp);
+    assert.equal(Date.parse(main[1].timestamp)-Date.parse(main[0].timestamp),2000);
+    const run=JSON.parse(await readFile(join(output,'session','subagents','agent-a.jsonl'),'utf8'));
+    assert.equal(run.timestamp,Date.parse(main[1].timestamp));
+    assert.equal(run.message.content,main[1].timestamp);
+    assert.equal(JSON.parse(await readFile(join(output,'session','subagents','agent-a.meta.json'),'utf8')).finishedAt,main[1].timestamp);
+  } finally {await rm(temporary,{recursive:true,force:true});}
+});
+
 test('targeted replacements cover paths, encoded directories, emails and owner/group words', () => {
   const input = 'owner@secret.invalid /home/secret-owner/code /Users/secret-owner/code '
     + '~/.claude/projects/-home-secret-owner-code/out /tmp/cc-demo-123ab/code '
@@ -186,4 +207,14 @@ test('CLI prints only statistics and creates a local report separately', async (
     assert.equal(stats.outputBytes, Buffer.byteLength(await readFile(out)));
     assert.ok((await readFile(report, 'utf8')).startsWith('LOCAL ONLY'));
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('redacted blocks preserve explicit errors without leaking unshifted times',()=>{
+  const copy=structuredClone(original);
+  for(const b of Object.values(copy.blocks)) {b.isError=b.kind==='tool_result';b.time=1790000000000;}
+  const out=redactSession(copy,config);
+  const blocks=Object.values(out.blocks);
+  assert.ok(blocks.some(b=>b.kind==='tool_result' && b.isError===true));
+  assert.ok(blocks.every(b=>!Object.hasOwn(b,'time')));
+  assert.ok(blocks.filter(b=>b.kind!=='tool_result').every(b=>!Object.hasOwn(b,'isError')));
 });

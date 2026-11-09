@@ -10,6 +10,8 @@ import { createHelp } from './ui/help.js';
 import { layoutRequest } from './layout.js';
 import { createRequestScheduler } from './ui/request-scheduler.js';
 import { createGame } from './ui/game.js';
+import { toolReport } from './ui/tools.js';
+import { createToolsPanel } from './ui/tools-panel.js';
 import { createFindingsPanel } from './ui/findings-panel.js';
 import { findBlockRequest, expandSession } from './ui/compact.js';
 import { gauge, formatTokens, limitOf, sessionCache } from './ui/math.js';
@@ -60,7 +62,18 @@ const stage = el('div', { id: 'stage', 'aria-label': '3D context city' });
 const sceneStatus = el('p', { id: 'scene-status' }, 'Loading the 3D library.');
 const help = createHelp();
 const enter = id => { game.enter(id); call('enterBlock', id); };
-const reader = createReaderPane(enter, { linked: block => linkedRun(session, block), openRun: switchRun });
+const reader = createReaderPane(enter, { linked: block => linkedRun(session, block), openRun: switchRun,
+  toolContext(block) {
+    if (!block || !mainSession) return null;
+    const report = toolReport(mainSession), agentId = activeRun?.agentId ?? null;
+    const failure = report.failures.find(f=>f.agentId===agentId && (f.resultBlockIds.includes(block.id) || f.callBlockId===block.id));
+    if (!failure) return null;
+    const isCall=block.kind==='tool_use';
+    return { failure, items: toolsPanel.scope(failure),
+      related: isCall ? failure : failure.callBlockId ? {...failure, blockId: failure.callBlockId, requestIdx: failure.callRequestIdx} : null };
+  }, navigateTool: navigate, stepTool: (delta, failure) => toolsPanel.step(delta, failure),
+  backToList: () => toolsPanel.open('failures'),
+});
 const index = createContextIndex({ fly: id => { select(id); call('flyToBlock', id); },
   enter: id => { select(id); enter(id); }, filter: (layer, visible) => call('setLayerVisible', layer, visible) });
 let districtPreference=readDistrictPreference();
@@ -68,28 +81,41 @@ const districtCheck=el('input',{id:'layer-subagents',type:'checkbox',checked:dis
 const districtLayer=el('label',{class:'layer-check',for:'layer-subagents',hidden:true},districtCheck,'Subagent districts');
 index.root.querySelector('details').append(districtLayer);
 index.root.querySelector('h2').after(agentList);
-const timeline = createTimeline(jump, switchRun);
+const timeline = createTimeline(jump, switchRun, (idx, agentId = activeRun?.agentId ?? null) => { const f=toolReport(mainSession).failures.find(f=>f.requestIdx===idx && f.agentId===agentId); if(f)toolsPanel.showFailure(f); });
 let pendingEvents = [];
 const game = createGame({ call, jump, summarySession: () => mainSession, showFindings: () => findingPanel.open(), queueEvent: event => pendingEvents.push(event), locate(id) {
   const idx = findBlockRequest(session, id);
   if (idx >= 0) { jump(idx, true); select(id); call('flyToBlock', id); }
 } });
 const findingPanel = createFindingsPanel({
-  navigate(finding) {
-    game.skipIntro(); game.pausePlayback();
-    const target = finding.agentId ? mainSession?.agents?.find(a => a.agentId === finding.agentId) : null;
-    if ((target?.agentId ?? null) !== (activeRun?.agentId ?? null)) switchRun(target);
-    findingPanel.open();
-    pendingFinding = finding.blockId ? { idx: finding.requestIdx, id: finding.blockId } : null;
-    jump(finding.requestIdx, true);
-    if (finding.blockId) select(finding.blockId);
-  },
+  navigate,
+  showFailures: f => toolsPanel.showFailure(f),
   onOpen() {
+    toolsPanel.close(false);
     game.skipIntro(); app.classList.add('show-findings'); app.classList.remove('show-menu');
     document.getElementById('menu-toggle')?.setAttribute('aria-expanded', 'false');
     updateInsets();
   },
   onClose() { app.classList.remove('show-findings'); return narrow.matches ? document.getElementById('menu-toggle') : null; },
+});
+function navigate(finding) {
+  game.skipIntro(); game.pausePlayback();
+  if (narrow.matches && !toolsPanel.root.hidden) toolsPanel.close(false);
+  const target = finding.agentId ? mainSession?.agents?.find(a => a.agentId === finding.agentId) : null;
+  if ((target?.agentId ?? null) !== (activeRun?.agentId ?? null)) switchRun(target);
+  pendingFinding = finding.blockId ? { idx: finding.requestIdx, id: finding.blockId } : null;
+  jump(finding.requestIdx, true);
+  // The request scheduler flies after its buildings have been uploaded.
+  if (finding.blockId) select(finding.blockId);
+}
+const toolsPanel = createToolsPanel({ navigate,
+  onFilterChange() { if (session && selected) reader.show(session.blocks[selected], tokens(selected)); },
+  onOpen() {
+    findingPanel.close(false); game.skipIntro(); game.pausePlayback(); closeMenu();
+    for (const target of ['index-panel','field-guide','reader-panel']) setPanel(target,false);
+    app.classList.add('show-tools'); updateInsets();
+  },
+  onClose() { app.classList.remove('show-tools'); return narrow.matches ? document.getElementById('menu-toggle') : null; },
 });
 const statValues = Array.from({ length: 4 }, () => el('b'));
 const stats = el('div', { class: 'stats', 'aria-label': 'Session numbers' }, ...['Context now', 'Of the window', 'Room left', 'Requests'].map((label, i) => el('div', { class: 'stat' }, statValues[i], el('span', {}, label))));
@@ -116,6 +142,7 @@ function setPanel(target, open, restoreFocus = false, openedBy = 'nav') {
 }
 function panelToggle(label, target) {
   return button(label, () => {
+    toolsPanel.close(false); findingPanel.close(false);
     const open = !openPanels.includes(target);
     setPanel(target, open);
     if (open) {
@@ -148,8 +175,8 @@ app.append(el('header', { class: 'card topbar' }, el('div', { class: 'identity' 
     button('Load example', () => exampleChooser.showModal(), { id: 'load-example' }), button('Help and privacy', () => help.open(), { id: 'help' })), fileInput, folderInput),
   el('div', { class: 'session-messages' }, notice, quiet, status, loading),
   el('nav', { class: 'viewbar', 'aria-label': 'View controls' }, panelToggle('Index', 'index-panel'),
-    panelToggle('Reader', 'reader-panel'), panelToggle('Field guide 0 of 9', 'field-guide'), button('Run summary', () => game.summary()), findingPanel.toggle, button('Guess', () => game.toggleGuess()), mode),
-  exampleChooser, addPicker, breadcrumb, agentBanner, workspace, game.guide, game.guess, game.intro, game.toast, game.summaryDialog, findingPanel.root,
+    panelToggle('Reader', 'reader-panel'), panelToggle('Field guide 0 of 9', 'field-guide'), button('Run summary', () => game.summary()), findingPanel.toggle, toolsPanel.toggle, button('Guess', () => game.toggleGuess()), mode),
+  exampleChooser, addPicker, breadcrumb, agentBanner, workspace, game.guide, game.guess, game.intro, game.toast, game.summaryDialog, findingPanel.root, toolsPanel.root,
   el('section', { class: 'card walk-controls', 'aria-label': 'Walk the sequence' }, el('strong', {}, 'Walk the sequence'), start, pause, stop,
     el('label', { for: 'reading-speed' }, 'Speed'), speed, speedLabel), timeline.root, help.root);
 const compactContext = el('span', { id: 'compact-context' });
@@ -195,6 +222,8 @@ function applyPanelState() {
   titleToggle.setAttribute('aria-expanded', 'false');
   app.classList.add('hide-reader', 'hide-index', 'hide-guide');
   for (const control of app.querySelectorAll('[aria-controls]')) control.setAttribute('aria-expanded','false');
+  findingPanel.toggle.setAttribute('aria-expanded',String(!findingPanel.root.hidden));
+  toolsPanel.toggle.setAttribute('aria-expanded',String(!toolsPanel.root.hidden));
 }
 function updateInsets() {
   const rect = stage.getBoundingClientRect();
@@ -203,14 +232,14 @@ function updateInsets() {
   const stripBottom = Math.max(80, ...[breadcrumb, agentBanner].filter(n => !n.hidden).map(n => n.getBoundingClientRect().bottom + 12));
   app.style.setProperty('--run-content-top', `${stripBottom}px`);
   app.style.setProperty('--findings-bottom', `${rect.bottom - tape.top + 12}px`);
-  const panels = [reader.root, game.guide, game.guess, findingPanel.root].filter(n => !n.hidden && getComputedStyle(n).display !== 'none');
+  const panels = [reader.root, game.guide, game.guess, findingPanel.root, toolsPanel.root].filter(n => !n.hidden && getComputedStyle(n).display !== 'none');
   const right = Math.max(0, ...panels.map(n => rect.right - n.getBoundingClientRect().left + 18));
   call('setViewInsets', narrow.matches
     ? { left: 12, right: 12, top: title.bottom + 20, bottom: Math.max(rect.bottom - tape.top, ...panels.map(n => rect.bottom - n.getBoundingClientRect().top)) + 12 }
     : { left: Math.max(title.right + 24, app.classList.contains('hide-index') ? 0 : 320), right: Math.max(24,right), top: 110, bottom: rect.bottom - tape.top + 18 });
 }
 const hudObserver = new ResizeObserver(updateInsets);
-for (const n of [app.querySelector('.identity'), reader.root, index.root, game.guide, game.guess, timeline.root, findingPanel.root, breadcrumb, agentBanner]) hudObserver.observe(n);
+for (const n of [app.querySelector('.identity'), reader.root, index.root, game.guide, game.guess, timeline.root, findingPanel.root, toolsPanel.root, breadcrumb, agentBanner]) hudObserver.observe(n);
 new MutationObserver(updateInsets).observe(app, { attributes: true, attributeFilter: ['class'] });
 new MutationObserver(updateInsets).observe(game.guess, { attributes: true, attributeFilter: ['hidden'], childList: true, subtree: true });
 new MutationObserver(() => {
@@ -232,6 +261,7 @@ function select(id, hover = false, reveal = true) {
   index.highlight(id, hover);
   if (hover) return;
   selected = id;
+  toolsPanel.sync(id,activeRun?.agentId ?? null);
   if (id && reveal) {
     game.select(id);
     setPanel('reader-panel', true, false, 'select');
@@ -301,7 +331,7 @@ function renderAgents() {
   agentBanner.querySelector('p').textContent = `This session ran ${ids.length} ${ids.length === 1 ? 'subagent' : 'subagents'}. Their work is stored separately. Pick the project folder or drop the session .jsonl together with its <session-id> folder to include them. Other sessions are ignored.`;
   breadcrumb.hidden = !activeRun;
   app.classList.toggle('viewing-run', !!activeRun);
-  breadcrumbText.textContent = activeRun ? `Main session / ${runLabel(activeRun)}: ${activeRun.description}` : '';
+  breadcrumbText.textContent = activeRun ? `Main session / ${runLabel(activeRun, mainSession.agents)}` : '';
   agentList.hidden = !runs.length;
   agentList.replaceChildren(el('h2', {}, 'Subagents'), ...runs.map(run => {
     const cache = sessionCache(run.session.requests);
@@ -310,7 +340,7 @@ function renderAgents() {
     if (run.agentId === activeRun?.agentId) {
       row.setAttribute('aria-current', 'true'); row.append(el('span', { class: 'viewing-label' }, 'Viewing'));
     }
-    row.append(el('strong', {}, runLabel(run)), el('span', {}, run.description),
+    row.append(el('strong', {}, runLabel(run, mainSession.agents)), ...(run.description.length > 64 ? [el('span', {}, run.description)] : []),
       el('span', { class: 'muted' }, `${run.session.requests.length} requests, ${total}. ${run.parentRequestIdx == null ? 'Not linked to a main request' : 'From main request ' + (run.parentRequestIdx + 1)}`));
     return row;
   }));
@@ -353,6 +383,7 @@ function setSession(value, navigating = false, startRequest = 0) {
   info.title = `${meta.skippedLines || 0} skipped lines · ${meta.sidechainRequests || 0} subagent requests not shown`;
   game.setSession(session, navigating);
   findingPanel.setSession(mainSession);
+  toolsPanel.setSession(mainSession);
   timeline.setSession(session, mainSession, activeRun); timeline.update(0); call('setSession', session);
   if (session.requests.length) {
     jump(startRequest, true);
@@ -424,6 +455,8 @@ addEventListener('blur', () => { dragDepth = 0; drop.hidden = true; });
 // Capture before canvas handlers so one press cannot also exit a scene mode.
 document.addEventListener('keydown', event => {
   if (event.key !== 'Escape') return;
+  if (!toolsPanel.root.hidden && event.target.closest?.('input, textarea, select, [contenteditable="true"]')) return;
+  if (!toolsPanel.root.hidden && !app.querySelector('dialog[open]') && !event.target.closest?.('input, textarea, select, [contenteditable="true"]')) { event.preventDefault(); event.stopImmediatePropagation(); toolsPanel.close(); return; }
   const action = escapeAction({ dialog: !!app.querySelector('dialog[open]'),
     findings: !findingPanel.root.hidden, menu: narrow.matches && app.classList.contains('show-menu'),
     zoom: timeline.isZoomed(), mode: scene?.getMode(), narrow: narrow.matches, panels: openPanels, readerOpenedBy });

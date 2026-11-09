@@ -1,6 +1,7 @@
 import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
 import { freeViewport } from './metropolis-model.js';
 import { colorFor, THEME } from './theme.js';
+import { toolLabel } from '../ui/tools.js';
 export { wrapText } from './paging.js';
 import { wrapPixels, looksJson, jsonTokens, CONTINUED } from './paging.js';
 
@@ -85,10 +86,10 @@ export function createLabels(container) {
       const tokens = Math.round((it.z1 - it.z0) * 100), key = JSON.stringify([it.blockId, tokens]);
       let r = cache.get(key);
       if (!r) {
-        r = record(`${it.label} · ~${tokens.toLocaleString('en-US')} tokens · ${session.blocks[it.blockId].provenance}`, it.layer, null, false);
+        r = record(`${session.blocks[it.blockId].toolName ? toolLabel(session.blocks[it.blockId].toolName) : it.label} · ~${tokens.toLocaleString('en-US')} tokens · ${session.blocks[it.blockId].provenance}${session.blocks[it.blockId].isError ? ", failed" : ""}`, it.layer, null, false);
         const block = session.blocks[it.blockId];
         const shortTokens = tokens >= 1000 ? `${+(tokens / 1000).toFixed(1)}K` : String(tokens);
-        r.short = record(`${block.toolName || it.label}${block.kind === 'tool_result' && block.toolName ? ' result' : ''}, ${shortTokens}`, it.layer, null, false);
+        r.short = record(`${block.toolName ? toolLabel(block.toolName) : it.label}${block.kind === 'tool_result' && block.toolName ? ' result' : ''}, ${shortTokens}${block.isError ? ", failed" : ""}`, it.layer, null, false);
         cache.set(key, r);
         if (cache.size > 20000) cache.delete(cache.keys().next().value);
       }

@@ -137,7 +137,7 @@ export function createParser(options = {}) {
   const dirtyGroups = new Set();
   const resultRecords = new Map(), agentResults = new Map(), asyncResults = new Set();
   const timestamps = [];
-  let recordPosition = 0;
+  let recordPosition = 0, ownTime = null;
   const resultTools = new Map(), nodes = new Map(), fallbackGroups = new Map(), promptEligibility = new Map(), promptTexts = new Map();
   let recentUsers = [], lastNode = null, sawApi = false, hasOrigins = false;
   const knownIgnored = new Set(['file-history-snapshot', 'summary', 'progress', 'queue-operation', 'system']);
@@ -153,7 +153,8 @@ export function createParser(options = {}) {
       id, role: null, toolName: null, text, chars: text?.length ?? 0,
       estTokens: Math.ceil((text?.length ?? 0) / 4), provenance: 'verbatim', ...stored,
     };
-    else if (fields.provenance === 'verbatim' && session.blocks[id].provenance === 'reconstructed') {
+    if (Number.isFinite(fields.time) && session.blocks[id].time == null) session.blocks[id].time = fields.time;
+    if (fields.provenance === 'verbatim' && session.blocks[id].provenance === 'reconstructed') {
       session.blocks[id].provenance = 'verbatim';
       if (fields.note) session.blocks[id].note = fields.note;
       else delete session.blocks[id].note;
@@ -183,7 +184,7 @@ export function createParser(options = {}) {
     const role = message.role ?? 'user';
     const content = typeof message.content === 'string' ? [{ type: 'text', text: message.content }] : message.content ?? [];
     return content.flatMap(part => {
-      const common = { role, provenance, ...(note ? { note } : {}) };
+      const common = { role, provenance, ...(Number.isFinite(ownTime) ? { time: ownTime } : {}), ...(note ? { note } : {}) };
       if (part.type === 'text') return splitText(part.text ?? '', role).map(piece => {
         const notification = /<task-notification\b/i.test(piece.text)
           ? [...piece.text.matchAll(/<(task-id|agent-id)>\s*([^<\s]+)\s*<\/\1>/gi)].map(match => match[2]) : [];
@@ -204,12 +205,13 @@ export function createParser(options = {}) {
           // Keep result sub-parts in wire order while excluding image bytes.
           return part.content.flatMap(p => {
             if (p.type !== 'image') return parts({ role, content: [{ ...part, content: [p] }] }, provenance, note);
-            const id = image(p, { ...common, toolUseId: part.tool_use_id });
+            const id = image(p, { ...common, toolUseId: part.tool_use_id, ...(part.is_error === true ? { isError: true } : {}) });
             resultTools.set(id, part.tool_use_id);
             return [id];
           });
         }
         const id = block({ ...common, kind: 'tool_result', layer: 'results', label: 'Tool result',
+          ...(part.is_error === true ? { isError: true } : {}),
           toolName: toolNames.get(part.tool_use_id) ?? null, toolUseId: part.tool_use_id, text: serialize(part) });
         resultTools.set(id, part.tool_use_id);
         return [id];
@@ -234,6 +236,7 @@ export function createParser(options = {}) {
     const position = recordPosition++;
     const time = typeof r.timestamp === 'number' ? r.timestamp : Date.parse(r.timestamp);
     if (Number.isFinite(time)) timestamps.push({ position, time });
+    ownTime = ['user', 'assistant'].includes(r.type) && Number.isFinite(time) ? time : null;
     const meta = session.meta;
     meta.sessionId ??= r.sessionId ?? null;
     meta.cliVersion ??= r.version ?? null;
@@ -396,6 +399,7 @@ export function createParser(options = {}) {
     dirtyGroups.clear();
   }
   function finish() {
+    ownTime = null; // Reconstructed request snapshots do not carry occurrence times.
     if (finished) return session;
     finished = true;
     let previousMessages = [], previousBlocks = new Set();

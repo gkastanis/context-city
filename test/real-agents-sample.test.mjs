@@ -3,9 +3,25 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { agentBranches, allAgentsLoaded } from '../src/ui/agents.js';
 import { compactSession, expandSession } from '../src/ui/compact.js';
+import { toolReport } from '../src/ui/tools.js';
 
 const text = await readFile(new URL('../sample/real-agents-session.json', import.meta.url), 'utf8');
 const sample = JSON.parse(text);
+test('every sample timestamp is in the fixed shifted session window, including text and child runs', () => {
+  const start = Date.parse('2026-01-01T00:00:00Z'), end = start + 5 * 60 * 1000;
+  const times = [];
+  function visit(value, key) {
+    if (value && typeof value === 'object') for (const [k,v] of Object.entries(value)) visit(v,k);
+    else if (typeof value === 'number' && ['time','timestamp','ts'].includes(key)) times.push(value);
+    else if (typeof value === 'string') for (const m of value.matchAll(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})/g)) times.push(Date.parse(m[0]));
+  }
+  visit(sample);
+  assert.ok(times.length > 200);
+  assert.equal(Math.min(...times),start);
+  assert.ok(times.every(t => t >= start && t <= end));
+  for (const date of text.matchAll(/\b\d{4}-\d{2}-\d{2}\b/g)) assert.equal(date[0], '2026-01-01');
+  assert.equal(toolReport(sample).tools.filter(t => t.latency.median != null).length,4);
+});
 
 test('recorded sample has four linked runs and starts at earliest maximum concurrency', () => {
   assert.equal(sample.requests.length, 21);

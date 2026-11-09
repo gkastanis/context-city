@@ -463,3 +463,39 @@ file; switching between the main session and loaded subagent runs retains it.
 `dev/t13-probe.mjs` checks close controls, visible focus restoration, Escape,
 phone panel exclusivity and browser errors at 400 by 860 and 1440 by 900 without
 mobile emulation. It runs against a local server on a port from 8790 to 8799.
+
+## Tools panel
+
+Tools beside Findings opens local tool diagnostics. Tools groups MCP servers first
+and built-ins last, with sortable calls, failures, result size (median/max),
+latency (median/max), and schema size/request counts. Row details include retries,
+identical inputs and per-run counts. Tools with failures open a filtered Failures
+list; other rows open their first call. Unused definitions expand below the table,
+with both per-request size and total carrying cost.
+
+Failures filters combine server, tool, category and run with AND. Previous/Next,
+Up/Down and j/k wrap through the filtered list; Enter reopens the selected result.
+Escape closes the panel and restores focus. Text inputs retain their keys. The
+Reader links a failure to its call and copies a local Markdown issue snippet.
+Red timeline ticks select failures. Loading another session clears filters.
+On phones the panel is a bottom sheet, at most 70vh; cards, filters and results
+scroll within it. The Reader remains above the sheet when a result is selected.
+The HUD uses dark tokens regardless of system color preference.
+
+Existing Findings detectors cover large output (20,000 estimated tokens or 10%
+of a request) and unused definitions (any positive carrying cost). These remain
+shared rather than producing duplicate findings. All sizes are estimates. Tool
+latency uses only timestamps from the actual user/assistant records, never nearest
+request timestamps; missing or redacted timing displays a dash. Categories use
+small ordered text rules, so they are hints rather than server diagnoses.
+
+
+Tool diagnostics refinements: retries require a later request than the failed
+result; parallel calls do not count. Error-text token estimates use extracted
+text only. Failure findings have a separate labelled group; the ranked list and
+Top finding use descending input cost. Reader counters and stepping share the
+filtered list when it contains the selection, otherwise the complete failure list.
+Open dialogs and other panels retain keyboard ownership; Reader arrows scroll,
+while j/k step failures. Between 761 and 1180 pixels Tools and Reader stack, with
+the Reader below Tools. Failed results show readable error text first, with the
+raw result under Verbatim. MCP titles and city labels use server / short name.

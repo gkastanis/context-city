@@ -2,7 +2,8 @@ import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/+esm';
 import { layoutRequest } from '../layout.js';
 import { agentBranches, agentColor, agentBranchLabel, runLabel } from '../ui/agents.js';
 import { districtLayout, districtGrid, runState, districtBridgeWidth, canalWidth, metropolisBounds } from './metropolis-model.js';
-import { facade } from './city.js';
+import { facade, createFailureBeacons } from './city.js';
+import { failurePin } from './failure-model.js';
 import { colorFor } from './theme.js';
 import { disposeTree } from './dispose.js';
 
@@ -11,7 +12,7 @@ void main(){local=position;dim=vec3(length(instanceMatrix[0].xyz),length(instanc
 
 export function createMetropolis() {
   const group = new THREE.Group(); group.name='subagent-metropolis';
-  let root=null, session=null, records=[], buildings=null, decks=null, pads=null, water=null, lampLights=null, beads=null;
+  let root=null, session=null, records=[], buildings=null, decks=null, pads=null, water=null, lampLights=null, beads=null, alerts=null;
   let canal=21, mainLength=0;
   let time=0, previous=-1, enabled=true, hovered=null, pulseCount=0;
   // Keep immutable run geometry and the last request layout across Back rebuilds.
@@ -20,7 +21,7 @@ export function createMetropolis() {
   const setMatrix=(mesh,i,x,y,z,sx,sy,sz,angle=0)=>{
     transform.position.set(x,y,z);transform.scale.set(sx,sy,sz);transform.rotation.set(0,angle,0);transform.updateMatrix();mesh.setMatrixAt(i,transform.matrix);
   };
-  function clear() { if(root){root.traverse(o=>{if(o.isInstancedMesh)o.dispose();});disposeTree(root);}root=null;records=[];buildings=decks=pads=water=lampLights=beads=null;previous=-1;hovered=null;pulseCount=0; }
+  function clear() { if(root){root.traverse(o=>{if(o.isInstancedMesh)o.dispose();});disposeTree(root);}root=null;records=[];buildings=decks=pads=water=lampLights=beads=alerts=null;previous=-1;hovered=null;pulseCount=0; }
   function load(value) {
     clear(); session=value;
     if(!value.agents?.some(run=>run.session.requests.length))return;
@@ -67,6 +68,7 @@ export function createMetropolis() {
     geometry.setAttribute('tool',new THREE.InstancedBufferAttribute(new Float32Array(count),1));
     const material=facade(null,false,true);
     buildings=new THREE.InstancedMesh(geometry,material,Math.max(1,count));buildings.setColorAt(0,color.set('#ffffff'));buildings.count=count;buildings.frustumCulled=false;buildings.name='subagent-buildings';root.add(buildings);
+    alerts=createFailureBeacons(Math.max(1,count));alerts.count=count;alerts.frustumCulled=false;alerts.name='subagent-failure-beacons';root.add(alerts);
     const padGeometry=box.clone();padGeometry.setAttribute('light',new THREE.InstancedBufferAttribute(new Float32Array(records.length),1));
     pads=new THREE.InstancedMesh(padGeometry,new THREE.ShaderMaterial({vertexColors:true,vertexShader:vertex,transparent:true,depthWrite:false,
       fragmentShader:`varying vec3 local,dim,tint,n;varying float lit;void main(){vec2 edge=(.5-abs(local.xz))*dim.xz;float rim=1.-smoothstep(.12,.45,min(edge.x,edge.y));vec2 g=abs(fract(local.xz*dim.xz/4.)-.5);float grid=step(.48,max(g.x,g.y));gl_FragColor=vec4(tint*rim*(.55+lit)+vec3(.07,.1,.15)*grid,rim*.7+.09);}`} ),records.length);
@@ -126,6 +128,7 @@ export function createMetropolis() {
     group.visible=enabled;
   }
   function sync(idx,reduced=false,mainLayout=null,restore=false) {
+    if(alerts)alerts.instanceMatrix.needsUpdate=true;
     if(!root)return;
     for(const r of records) {
       const next=r.branch?runState(r.branch,idx,session.requests[idx]?.time,r.run.session.requests):{state:'merged',idx:r.run.session.requests.length-1};
@@ -134,10 +137,13 @@ export function createMetropolis() {
       if(next.idx>=0 && r.cached.idx!==next.idx){r.cached.idx=next.idx;r.cached.layout=layoutRequest(r.run.session,next.idx);}
       const active=next.idx>=0?new Map(r.cached.layout.items.map(it=>[it.blockId,it])):new Map();
       r.active=active;
+      const skyline=Math.max(0,...r.grid.cells.filter(cell=>active.has(cell.blockId)).map(cell=>cell.height));
       r.grid.cells.forEach((c,j)=>{
         const it=active.get(c.blockId),max=r.maximum.get(c.blockId);
         const factor=it?Math.sqrt(it.height*(it.z1-it.z0)/(max.height*(max.z1-max.z0)||1)):0;
         setMatrix(buildings,r.offset+j,r.y+c.y-r.depth/2,c.height/2,r.x+c.x-r.width/2,Math.max(0,c.side*factor),it?c.height:0,Math.max(0,c.side*factor));
+        const pin=failurePin(c.height, skyline, !!it?.isError && factor>0 && next.state!=='pending');
+        setMatrix(alerts,r.offset+j,r.y+c.y-r.depth/2,pin.base,r.x+c.x-r.width/2,pin.visible?1:0,pin.visible?pin.height:0,pin.visible?1:0);
         buildings.setColorAt(r.offset+j,color.set(colorFor(c.layer)));
         buildings.geometry.attributes.tool.setX(r.offset+j,c.kind==='tool_def'?1:0);
         const split=max.split,total=(split?.descTokens??0)+(split?.schemaTokens??0);buildings.geometry.attributes.glassStart.setX(r.offset+j,(total?split.descTokens/total:.5)-.5);
@@ -182,7 +188,7 @@ export function createMetropolis() {
   }
   return {group,load,sync,highlight,
     setVisible(v){enabled=v;group.visible=v;highlight(null);},
-    labels:(metropolis=false)=>enabled?records.filter(r=>!metropolis||r.labelRank<6||r.agentId===hovered).map(r=>({label:`${runLabel(r.run)}: ${(r.run.description||'').slice(0,40)}`,layer:null,agent:true,agentId:r.agentId,x:r.y,color:r.color,metropolis,labelHeight:Math.max(10,...r.grid.cells.map(c=>c.height))+4,z0:r.x,z1:r.x,hovered:r.agentId===hovered})):[],
+    labels:(metropolis=false)=>enabled?records.filter(r=>!metropolis||r.labelRank<6||r.agentId===hovered).map(r=>({label:runLabel(r.run,session.agents),layer:null,agent:true,agentId:r.agentId,x:r.y,color:r.color,metropolis,labelHeight:Math.max(10,...r.grid.cells.map(c=>c.height))+4,z0:r.x,z1:r.x,hovered:r.agentId===hovered})):[],
     bounds(layout){return metropolisBounds(layout,records);},
     points(existingOnly=false){
       const points=[];
@@ -214,7 +220,7 @@ export function createMetropolis() {
       if(!enabled||!root||!group.visible)return null;
       const hit=new THREE.Vector3();let best=null,distance=Infinity;
       for(const r of records)if(ray.ray.intersectBox(r.box,hit)){const d=hit.distanceTo(ray.ray.origin);if(d<distance){distance=d;best=r;}}
-      if(best)return {userData:{agentId:best.agentId,tooltip:best.branch?agentBranchLabel(best.branch):`${runLabel(best.run)}: ${best.run.description}`}};
+      if(best)return {userData:{agentId:best.agentId,tooltip:best.branch?agentBranchLabel(best.branch):runLabel(best.run,session.agents)}};
       const bridge=ray.intersectObject(decks)[0];
       if(bridge){const segment=decks.userData.segments[bridge.instanceId%decks.userData.segments.length],r=records[segment.ri],b=r.branch;return {userData:{bridge:true,tooltip:b.open?'Has not returned yet':!segment.returning?'Started this subagent run':`Returned ${b.returnedTokens.toLocaleString('en-US')} tokens to the main context, kept ${Math.max(0,b.peak-b.returnedTokens).toLocaleString('en-US')} out (${b.delegation==null?'unavailable':b.delegation.toFixed(1)+'x'})`}};}
       return null;

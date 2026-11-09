@@ -46,7 +46,18 @@ For a local private-word gate, the sample command also accepts
 scan: alphanumeric words use word boundaries, other entries use literal matching,
 case-insensitively. Matches become `demo`; the list and originals are never emitted.
 Regenerate with the same list for reproducibility. This sample was generated with
-the repository's untracked local list. Neither mode bundles saved tool outputs.
+the repository's untracked local list. Folder mode shifts all record timestamps and ISO instants, including those in
+message text and agent metadata, by one shared offset. The earliest record across
+the main and child transcripts becomes `2026-01-01T00:00:00Z`. Relative offsets
+and per-block record times survive, so tool latency remains available. No original
+start date or time of day is retained. Plain date literals in text also become
+`2026-01-01`. Missing times stay missing. The sample is re-anchored after parsing
+if early bookkeeping records were omitted; child source names become
+`subagent.jsonl`. This applies to
+`npm run sample:real` as well; the older `real-session-redacted.json` is unchanged.
+Use `--user "$(id -un)"` to supply the local username without saving it in a file.
+
+Neither mode bundles saved tool outputs.
 Single-file mode below retains its original default-deny behavior.
 
 ## What survives

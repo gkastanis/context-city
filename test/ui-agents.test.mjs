@@ -66,7 +66,7 @@ test('agent sessions survive nested compact/expand and whole cache sums measurem
 
 test('merged findings prefix runs and share tool usage across threads', () => {
   const s = pair(), list = findings(s);
-  assert.ok(list.some(f => f.agentId === 'run' && f.title.startsWith('reviewer: Bash result')));
+  assert.ok(list.some(f => f.agentId === 'run' && f.title.startsWith('reviewer: '+metadata.description+': Bash result')));
   const unused = list.filter(f => f.kind === 'unused_tools');
   assert.ok(unused.length);
   assert.ok(unused.every(f => !f.detail.includes('Bash')));

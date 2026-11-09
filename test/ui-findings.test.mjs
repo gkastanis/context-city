@@ -89,7 +89,7 @@ test('cache summary has no ranking cost and follows the first rebuild', () => {
   const all = findings(s), summary = all.find(f => f.id === 'cache_rewrite:summary');
   assert.equal(summary.cost, 0); assert.equal(summary.tokens, 179000);
   assert.equal(summary.basis, 'measured'); assert.match(summary.detail, /179K tokens/);
-  assert.equal(all.indexOf(summary), all.findIndex(f => f.kind === 'cache_rewrite') + 1);
+  assert.equal(all.at(-1), summary);
 });
 
 test('panel excludes the summary from the badge and labels measured and estimated chips', () => {
@@ -109,11 +109,11 @@ test('panel excludes the summary from the badge and labels measured and estimate
     assert.equal(panel.toggle.children.at(-1).textContent, '4');
     const list = panel.root.children.at(-1), rows = list.children;
     assert.equal(rows.length, 5);
-    assert.equal(rows[1].attrs['data-finding-id'], 'cache_rewrite:summary');
+    assert.equal(rows.at(-1).attrs['data-finding-id'], 'cache_rewrite:summary');
     const chips = rows.map(row => row.children.at(-1));
     assert.ok(chips[0].children[0].endsWith('tokens (measured)'));
-    assert.ok(chips.at(-1).children[0].endsWith('tokens (estimated)'));
-    assert.ok(chips[1].children[0].startsWith('179K'));
+    assert.ok(chips.at(-2).children[0].endsWith('tokens (estimated)'));
+    assert.ok(chips.at(-1).children[0].startsWith('179K'));
   } finally { globalThis.document = original; }
 });
 

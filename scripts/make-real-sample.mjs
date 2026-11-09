@@ -21,9 +21,24 @@ export async function makeRealSample(input, user, privateWords = []) {
     for (const child of children.filter(n => n.endsWith('.jsonl'))) {
       const name = join(sessionId, 'subagents', child);
       const metadata = JSON.parse(await readFile(join(output, name.replace(/\.jsonl$/, '.meta.json')), 'utf8'));
-      runs.push(agentRun(await parse(name), child, metadata));
+      const childSession = await parse(name);
+      childSession.meta.sourceName = 'subagent.jsonl';
+      runs.push(agentRun(childSession, child, metadata));
     }
-    const session = attachAgents(await parse(main), runs);
+    let session = attachAgents(await parse(main), runs);
+    // The parser can omit early bookkeeping records. Anchor the published
+    // session itself, applying the same correction to text and every child.
+    const epoch = Date.parse('2026-01-01T00:00:00Z');
+    const correction = epoch - Date.parse(session.meta.startedAt);
+    const rebase = (value, key) => {
+      if (Array.isArray(value)) return value.map(v => rebase(v));
+      if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k,v]) => [k,rebase(v,k)]));
+      if (typeof value === 'number' && ['time','timestamp','ts'].includes(key)) return value + correction;
+      if (typeof value === 'string') return value.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\b/g,
+        instant => new Date(Date.parse(instant) + correction).toISOString().replace('.000Z','Z'));
+      return value;
+    };
+    if (Number.isFinite(correction) && correction) session = rebase(session);
     session.meta.sample = true;
     session.meta.redacted = true;
     session.meta.targetedRedaction = true;

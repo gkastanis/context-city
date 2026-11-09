@@ -41,6 +41,12 @@ Session = {
 }
 ```
 
+Tool-result blocks may carry optional `isError: true` when the wire part has
+`is_error === true`; otherwise the field is omitted. Split image and text
+sub-blocks all carry the flag, including in subagent Sessions. Compaction and
+worker transfer preserve it. It describes the recorded result, not a heuristic.
+
+
 ## Block
 
 One contiguous piece of context: a system block, one tool definition, one message
@@ -191,3 +197,20 @@ The page parses dropped files in the browser. No network calls with transcript
 content, no localStorage of content, no upload. The bundled sample contains no
 real transcript text. Scripts that run on real transcripts print statistics only,
 never transcript text.
+
+## Tool diagnostics
+
+Tool statistics and failure navigation are derived in `src/ui/tools.js`, not stored
+on Session. Each tool row includes server/short name, call and failure counts,
+result token distribution, definition size and carrying counts/cost, recorded
+latency distribution, retries, identical inputs, category counts and per-run counts.
+Split result images belong to one call; output size includes images while error
+text cost excludes them. A retry means the immediately following call in that run
+uses the same tool after its failed result. Repeated input counts exclude the
+first occurrence. Failed results without a matching recorded call still appear.
+
+Blocks may carry optional `time`, milliseconds since epoch from their own
+user/assistant record. It is omitted when unavailable. It is never inferred from
+request timing or API snapshots. Existing snapshots retain a known occurrence time
+when the same block is recovered later. Compact/worker transfer preserves this
+field. Latency requires real times on both linked blocks and is otherwise null.

@@ -1,6 +1,26 @@
 import { allAgentsLoaded, runLabel } from './agents.js';
 import { formatTokens } from './math.js';
 import { forEachRequestChange } from './compact.js';
+import { resultText } from './tools.js';
+
+export function failedToolCalls(session) {
+  const calls = new Map();
+  forEachRequestChange(session, (r, idx, ids, removed, keep) => {
+    for (let i = keep; i < ids.length; i++) {
+      const b = session.blocks[ids[i]];
+      if (!b?.isError || !result(b)) continue;
+      const key = b.toolUseId ?? b.id;
+      if (!calls.has(key)) calls.set(key, { blockId: b.id, requestIdx: idx, toolName: b.toolName || 'Tool', tokens: 0, blocks: new Set() });
+      const call = calls.get(key);
+      if (!call.blocks.has(b.id)) {
+        call.blocks.add(b.id);
+        // Images have token estimates, but are not error text.
+        if (b.kind === 'tool_result') call.tokens += Math.ceil(resultText(b).length / 4);
+      }
+    }
+  });
+  return [...calls.values()].map(({ blocks, ...call }) => call);
+}
 
 const memo = new WeakMap();
 const size = b => Number.isFinite(b?.estTokens) ? Math.max(0, b.estTokens) : 0;
@@ -21,16 +41,22 @@ export function findings(session) {
   const complete = allAgentsLoaded(session);
   const out = findingsFor(session, used, complete);
   for (const run of runs) for (const f of findingsFor(run.session, used, complete)) {
-    out.push({ ...f, id: run.agentId + ':' + f.id, agentId: run.agentId, title: runLabel(run) + ': ' + f.title });
+    out.push({ ...f, id: run.agentId + ':' + f.id, agentId: run.agentId, title: runLabel(run, runs) + ': ' + f.title });
   }
-  if (runs.length) {
-    out.sort((a, b) => b.cost - a.cost);
-    for (const summary of out.filter(f => f.kind === 'cache_rewrite' && f.cost === 0)) {
-      out.splice(out.indexOf(summary), 1);
-      const first = out.findIndex(f => f.kind === 'cache_rewrite' && f.agentId === summary.agentId);
-      out.splice(first + 1, 0, summary);
+  const failures = [{ session, label: 'Main', agentId: null }, ...runs.map(a => ({ session: a.session, label: runLabel(a, runs), agentId: a.agentId }))]
+    .flatMap(run => failedToolCalls(run.session).map(call => ({ ...call, agentId: run.agentId, run: run.label })));
+  if (failures.length) {
+    const breakdown = new Map();
+    for (const f of failures) {
+      const key = `${runs.length ? f.run + ': ' : ''}${f.toolName}`;
+      breakdown.set(key, (breakdown.get(key) ?? 0) + 1);
     }
+    const cost = failures.reduce((n, f) => n + f.tokens, 0);
+    out.push({ id: 'failed_tools:all', kind: 'failed_tools', title: 'Failed tool calls',
+      detail: `${plural(failures.length, 'failed call')}; ${tokens(cost)} of estimated error text. ` + [...breakdown].map(([name, count]) => `${name}: ${count}`).join('; '),
+      ...failures[0], cost, tokens: cost, basis: 'estimated', count: failures.length, targets: failures });
   }
+  out.sort((a, b) => b.cost - a.cost);
   memo.set(session, out);
   return out;
 }

@@ -28,7 +28,7 @@ export function layoutRequest(session, requestIdx, opts = {}) {
     const z0 = token * 0.01;
     token += equalTokens ?? b.estTokens * scale;
     const item = { blockId: b.id, z0, z1: token * 0.01, layer: b.layer,
-      kind: b.kind, height: Math.min(220, (HEIGHTS[b.kind] ?? 5) + Math.sqrt(equalTokens ?? b.estTokens * scale) * .85), label: b.label, split: b.split, paramCount: b.params?.length ?? 0, isNew: requestIdx > 0 && fresh.has(b.id) };
+      kind: b.kind, ...(b.isError ? { isError: true } : {}), height: Math.min(220, (HEIGHTS[b.kind] ?? 5) + Math.sqrt(equalTokens ?? b.estTokens * scale) * .85), label: b.label, split: b.split, paramCount: b.params?.length ?? 0, isNew: requestIdx > 0 && fresh.has(b.id) };
     items.push(item);
     // A user prompt begins a conversation turn. Preserve the request's actual
     // order, including reminders and results that occur between messages.

@@ -104,6 +104,7 @@ export function redactSession(session, config = {}) {
       note: `Redacted before publishing. Original length ${number(b.chars) ?? 0} characters.`,
       role: choose(b.role, ['system', 'user', 'assistant']), chars: number(b.chars), estTokens: number(b.estTokens),
       toolName: mapTool(b.toolName) };
+    if (b.isError === true) block.isError = true;
     if (b.kind === 'tool_def') {
       block.params = (b.params ?? []).map((p, i) => ({
         name: publicTools.has(b.toolName) ? p.name : `param-${i + 1}`,
@@ -186,13 +187,27 @@ export async function redactFolder(input, output, user, privateWords = []) {
   const main = names[0], id = main.slice(0, -6);
   const childDir = join(input, id, 'subagents');
   const children = (await readdir(childDir)).filter(n => /^agent-.+\.(jsonl|meta\.json)$/.test(n)).sort();
+  const paths = [main, ...children.map(n => join(id, 'subagents', n))];
+  const sources = await Promise.all(paths.map(name => readFile(join(input, name), 'utf8')));
+  const times = sources.flatMap((raw, i) => paths[i].endsWith('.jsonl') ? raw.split('\n').filter(s => s.trim()).map(line => {
+    const value = JSON.parse(line).timestamp;
+    return typeof value === 'number' ? value : Date.parse(value);
+  }).filter(Number.isFinite) : []);
+  const base = times.reduce((minimum, time) => Math.min(minimum, time), Infinity);
+  const epoch = Date.parse('2026-01-01T00:00:00Z');
+  const shift = text => text.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b/g, value => {
+    const instant = Date.parse(value);
+    return Number.isFinite(base) && Number.isFinite(instant) ? new Date(epoch + instant - base).toISOString().replace('.000Z', 'Z') : 'date-unavailable';
+  }).replace(/\b\d{4}-\d{2}-\d{2}\b(?!T)/g, '2026-01-01')
+    .replace(/("(?:timestamp|time|ts|startedAt|endedAt)"\s*:\s*)(\d{13})(?!\d)/g,
+    (_, key, value) => key + (Number.isFinite(base) ? epoch + Number(value) - base : 'null'));
   // Read and transform before creating output. Never write an unredacted byte.
   const ids = new Map();
   const files = [];
-  for (const name of [main, ...children.map(n => join(id, 'subagents', n))]) {
-    const raw = await readFile(join(input, name), 'utf8');
+  for (const [index, name] of paths.entries()) {
+    const raw = sources[index];
     if (name.endsWith('.meta.json')) {
-      const content = redactTranscript(raw, user, privateWords, ids);
+      const content = shift(redactTranscript(raw, user, privateWords, ids));
       JSON.parse(content);
       files.push([name, content]);
       continue;
@@ -230,7 +245,7 @@ export async function redactFolder(input, output, user, privateWords = []) {
     }
     flush();
     const blobs = [...recovered].map(([hash, message]) => JSON.stringify({ type: 'api-request-blob', hash, message }));
-    const content = redactTranscript([...blobs, raw].join('\n'), user, privateWords, ids);
+    const content = shift(redactTranscript([...blobs, raw].join('\n'), user, privateWords, ids));
     for (const line of content.split('\n').filter(line => line.trim())) JSON.parse(line);
     files.push([name, content]);
   }

@@ -1,6 +1,31 @@
+import { forEachRequestChange } from './compact.js';
 import { el, button, svgEl } from './dom.js';
 import { formatTokens, gauge, markerPercent, eventLabel, sparkPoints, requestStories, fuelState, limitOf, cacheSplit, timelineTimes } from './math.js';
 import { agentBranches, agentColor, agentBranchLabel, runDuration, durationLabel } from './agents.js';
+
+const failedRequests = new WeakMap();
+// Mark the request where a failed result first enters the context. A failed
+// result stays in later requests; ticking those too would hide new failures.
+export function failedRequestIndices(session) {
+  if (failedRequests.has(session)) return failedRequests.get(session);
+  const out = [], seen = new Set();
+  forEachRequestChange(session, (r, idx, ids, removed, keep) => {
+    let fresh = false;
+    for (let i = keep; i < ids.length; i++) if (session.blocks[ids[i]]?.isError && !seen.has(ids[i])) { seen.add(ids[i]); fresh = true; }
+    if (fresh) out.push(idx);
+  });
+  failedRequests.set(session, out);
+  return out;
+}
+export function failureTickPositions(session, project) {
+  return failedRequestIndices(session).map(idx => ({ idx, x: project(idx) })).filter(p => Number.isFinite(p.x));
+}
+
+export function branchFailureTickPositions(session, { axis, async, start, end, timeX, width }) {
+  return failureTickPositions(session, i => axis === 'time' && !async && Number.isFinite(session.requests[i].time)
+    ? timeX(session.requests[i].time) / 100 * width
+    : start + (end - start) * i / Math.max(1, session.requests.length - 1));
+}
 
 // Axis domains use full-chart coordinates, independent of viewport size.
 export function axisRange(domain, a, b) {
@@ -37,7 +62,7 @@ export function timeScale(times, width, foreground = []) {
   return { x, breaks };
 }
 
-export function createTimeline(jump, openRun = () => {}) {
+export function createTimeline(jump, openRun = () => {}, selectFailure = () => {}) {
   const slider = el('input', { id: 'request-slider', type: 'range', min: 0, max: 0, value: 0, step: 1 });
   const story = el('p', { id: 'request-story', class: 'request-story' });
   const fuelFill = el('i');
@@ -136,6 +161,17 @@ export function createTimeline(jump, openRun = () => {}) {
   spark.append(area, threshold, path, cursor);
   const breaks = svgEl('g', { class: 'time-breaks', 'aria-hidden': 'true' });
   spark.append(breaks);
+  const failures = svgEl('g', { class: 'failure-ticks' }); spark.append(failures);
+  const tick = (x,y,idx,agentId,unitsPerPixel = 1) => {
+    const hitWidth = Math.max(10, 24 * unitsPerPixel);
+    const node = svgEl('g', { class: 'failure-tick-target', tabindex:'0', role:'button', 'aria-label':`Failed tool call at request ${idx+1}`, 'data-request-idx':idx });
+    node.append(svgEl('path',{d:`M${x},${y-3} v6`,class:'failure-tick'}),svgEl('rect',{x:x-hitWidth/2,y:Math.max(0,y-12),width:hitWidth,height:24,class:'failure-hit'}));
+    const activate=event=>{event.stopPropagation();selectFailure(idx,agentId);};
+    node.addEventListener('click',activate);
+    node.addEventListener('pointerdown',event=>event.stopPropagation());
+    node.addEventListener('keydown',event=>{if(['Enter',' '].includes(event.key)){event.preventDefault();activate(event);}});
+    return node;
+  };
   const laneTrack = el('div', { class: 'agent-lane-track' });
   const laneCursor = el('i', { class: 'agent-lane-cursor', 'aria-hidden': 'true' });
   const laneTip = el('p', { class: 'agent-lane-tip', role: 'tooltip', id: 'agent-lane-tip', hidden: true });
@@ -185,6 +221,7 @@ export function createTimeline(jump, openRun = () => {}) {
     path.setAttribute('points', points); area.setAttribute('points', `0,40 ${points} 600,40`);
     breaks.replaceChildren();
     if (axis === 'time') for (const x of scale.breaks) breaks.append(svgEl('path', { d: `M${rangePosition(x, zoom ?? fullDomain(), 600) - 2},1 l-2,7 M${rangePosition(x, zoom ?? fullDomain(), 600) + 2},1 l-2,7`, class: 'time-break' }));
+    failures.replaceChildren(...failureTickPositions(session, i => xPercent(i)*6).filter(p => p.x>=0 && p.x<=600).map(p => tick(p.x, 35, p.idx, undefined, 600 / Math.max(1, spark.getBoundingClientRect().width))));
     renderLanes(); drawMarkers(); focusEvent(focused);
     cursor.style.display = laneCursor.style.display = xPercent(idx) < 0 || xPercent(idx) > 100 ? 'none' : '';
     cursor.setAttribute('x1', xPercent(idx) * 6); cursor.setAttribute('x2', xPercent(idx) * 6);
@@ -213,6 +250,7 @@ export function createTimeline(jump, openRun = () => {}) {
     const width = Math.max(1, laneTrack.getBoundingClientRect().width);
     const graph = svgEl('svg', { class: 'agent-graph', viewBox: `0 0 ${width} ${height}`, 'aria-label': 'Subagent branch graph' });
     graph.append(svgEl('path', { d: `M0,1 H${width}`, class: 'agent-main-line' }));
+    for (const p of failureTickPositions(session, i => xPercent(i)/100*width).filter(p => p.x>=0 && p.x<=width)) graph.append(tick(p.x, 4, p.idx));
     lanes.forEach((run, index) => {
       const source = session.agents.find(a => a.agentId === run.agentId), label = agentBranchLabel(run);
       const start = (axis === 'time' && !run.async && run.runStart != null ? timeX(run.runStart) : xPercent(run.fork)) / 100 * width;
@@ -233,6 +271,8 @@ export function createTimeline(jump, openRun = () => {}) {
         group.append(svgEl('polygon', { class: 'agent-branch-fill', points: `0,7 ${points} ${Math.max(1, end - start - 2 * bend)},7`, transform: `translate(${start + bend},${y - 7})` }));
       }
       group.append(svgEl('path', { d, class: 'agent-branch-line', fill: 'none' }));
+      const branchTicks = branchFailureTickPositions(source.session, { axis, async: run.async, start, end, timeX, width });
+      for (const p of branchTicks.filter(p => p.x>=0 && p.x<=width)) group.append(tick(p.x, y, p.idx, run.agentId));
       if (run.open) group.append(svgEl('path', { d: `M${end},1 H${width}`, class: 'agent-open-tail', fill: 'none' }));
       for (const [x, kind] of [[start, 'fork'], [end, 'merge']]) group.append(svgEl('circle', { cx: x, cy: 1, r: 2.5, class: `agent-dot agent-${kind}${run.open && kind === 'merge' ? ' agent-dot-open' : ''}` }));
       if (!mobile && end - start > 32) {
